@@ -1,5 +1,7 @@
 #[macro_use]
 mod account;
+#[cfg(target_os = "android")]
+mod android_storage;
 #[macro_use]
 mod device;
 #[macro_use]
@@ -44,6 +46,8 @@ pub fn run() {
         .expect("Failed to install TLS crypto provider");
     isideload::init().expect("Failed to initialize error reporting");
     let builder = tauri::Builder::default();
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(android_storage::init());
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     builder

@@ -27,7 +27,7 @@ use tracing::{error, info, warn};
 use crate::{
     device::{DeviceInfo, DeviceInfoMutex, DeviceInfoWithPairing, get_provider, get_usb_provider},
     error::AppError,
-    secure_storage::{create_sideloading_storage, keyring_available},
+    secure_storage::{create_sideloading_storage, storage_available},
 };
 
 struct PairingStorageEntry {
@@ -296,7 +296,7 @@ fn with_pairing_storage<T>(
     app: &AppHandle,
     f: impl FnOnce(&dyn SideloadingStorage) -> Result<T, AppError>,
 ) -> Result<T, AppError> {
-    let current_keyring_enabled = keyring_available();
+    let current_keyring_enabled = storage_available(app);
     let storage = PAIRING_STORAGE
         .get_or_init(|| Mutex::new(build_pairing_storage_entry(app, current_keyring_enabled)));
 

@@ -3,14 +3,32 @@
 <body><div id="root"></div><script type="module">
 import { mockIPC, mockWindows } from '/node_modules/@tauri-apps/api/mocks.js';
 window.testCalls = [];
+const credentialsTest = new URLSearchParams(location.search).has('credentials');
+if (credentialsTest) localStorage.setItem('i18nextLng', 'en');
+const values = credentialsTest ? JSON.parse(localStorage.getItem('fixture-settings') || '{}') : {};
+let loggedIn = null;
 mockIPC((command, args) => {
   window.testCalls.push({ command, args });
   if (command === 'plugin:store|load') return 1;
   if (command === 'plugin:store|keys') return [];
-  if (command === 'plugin:store|get') return [null, false];
+  if (command === 'plugin:store|get') return [values[args.key] ?? null, args.key in values];
+  if (command === 'plugin:store|set') { values[args.key] = args.value; return null; }
   if (command === 'plugin:app|version') return '2.3.4';
-  if (command === 'keyring_available') return false;
-  if (command === 'logged_in_as') return null;
+  if (command === 'keyring_available') return credentialsTest;
+  if (command === 'logged_in_as') return loggedIn;
+  if (command === 'login_new') {
+    loggedIn = args.email;
+    if (args.saveCredentials) {
+      values.ids = [...new Set([...(values.ids || []), args.email])];
+      localStorage.setItem('fixture-settings', JSON.stringify(values));
+    }
+  }
+  if (command === 'login_stored') loggedIn = args.email;
+  if (command === 'invalidate_account') loggedIn = null;
+  if (command === 'delete_account') {
+    values.ids = (values.ids || []).filter(id => id !== args.email);
+    localStorage.setItem('fixture-settings', JSON.stringify(values));
+  }
   if (command === 'plugin:dialog|open') return 'content://test-provider/pairing.plist';
   if (command === 'connect_network_device') {
     if (args.address === '192.168.1.99') throw { type: 'device_coms', message: 'Connection timed out' };

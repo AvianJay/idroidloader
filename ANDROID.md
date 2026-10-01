@@ -11,7 +11,11 @@ Community Android port of [iloader](https://github.com/nab138/iloader). This is 
 
 You do not need a computer during subsequent installations while the pairing remains trusted and the iPhone remains reachable. Pairing does not replace signing credentials or iOS Developer Mode requirements.
 
-Pairing credentials and mobile signing/authentication storage remain in process memory. Reimport the pairing file and sign in after restarting the app. Password saving is disabled on Android pending a native Keystore backend. Imported temporary IPA copies are deleted when the operation finishes.
+On Android, check **Save credentials** when signing in to remember an Apple ID and password. After restarting, select the account under **Saved logins** and tap **Sign in**. Apple may still request two-factor authentication. **Delete** removes its saved password; signing out ends the current session without deleting saved credentials.
+
+Passwords are saved only after a successful login and only when you opt in. Passwords, anisette state, and signing certificates use AES-256-GCM authenticated encryption with a non-exportable Android Keystore key. The private preferences contain ciphertext; app backup is disabled. Passwords are never written to the frontend settings store. If Keystore is unavailable, password saving is disabled and signing data stays in memory. Clearing app data or uninstalling removes saved accounts.
+
+Pairing credentials remain in process memory; reimport the pairing file after restarting. Imported temporary IPA copies are deleted when the operation finishes.
 
 RemotePairing-only files are detected and rejected with an explanation. The first version uses Lockdown over TCP; a RemotePairing/RSD network connection is not implemented. Cross-network use needs a routed VPN or equivalent connectivity. Imported records are never printed in logs or returned to the frontend.
 
@@ -53,6 +57,8 @@ powershell -ExecutionPolicy Bypass -File scripts/android.ps1 Test
 - Built the ARM64 debug APK, verified its Android signature, and confirmed it packages the ARM64 native library.
 - Installed and cold-started the APK on an Android 16 emulator with ARM64 translation.
 - Used the real Android document picker to import an incomplete plist. The native backend read the content URI and returned the expected missing-certificate error.
-- Passed all 6 Rust unit tests and both mobile browser UI tests. Browser tests use mocked device responses; they do not validate iPhone communication.
+- Passed all 6 Rust unit tests and 4 mobile browser UI tests, including opt-in saved login, reopening, signing out, and deletion. Browser tests use mocked account/device responses; they do not validate Apple authentication or iPhone communication.
+- Passed 5 Android instrumentation checks using isolated public fixtures: encrypted writes/overwrites, deletion, ciphertext tampering/record substitution, missing encryption keys, and retrieval in a new process after a forced stop.
+- Confirmed the running debug APK reports Keystore availability, displays the unchecked **Save credentials** option, and rejects direct frontend access to native stored values.
 
 No physical iPhone or valid pairing credentials were available for interoperability testing. Real-device checks still need to cover successful connection, revoked pairing, unreachable IP, signed IPA installation, Apple ID/2FA signing, and SideStore pairing placement.

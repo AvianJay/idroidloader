@@ -10,7 +10,6 @@ use isideload::{
     sideload::{SideloaderBuilder, builder::MaxCertsBehavior, sideloader::Sideloader},
     util::callbacks::MaxCertsCallbackBox,
 };
-use keyring::Entry;
 use rootcause::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -21,7 +20,9 @@ use tracing::debug;
 
 use crate::{
     error::AppError,
-    secure_storage::create_sideloading_storage,
+    secure_storage::{
+        create_sideloading_storage, delete_anisette, delete_password, load_password, save_password,
+    },
     sideload::{SideloaderGuard, SideloaderMutex},
 };
 
@@ -35,20 +36,11 @@ pub async fn login_new(
     anisette_server: String,
     save_credentials: bool,
 ) -> Result<(), AppError> {
+    let email = email.trim().to_lowercase();
     let account = login(&handle, window, &email, &password, anisette_server).await?;
-    let mut sideloader_guard = sideloader_state.lock().unwrap();
-    *sideloader_guard = Some(account);
 
     if save_credentials {
-        let pass_entry = Entry::new("iloader", &email).map_err(|e| {
-            AppError::KeyringWithMessage(
-                "Failed to create entry for credentials".into(),
-                e.to_string(),
-            )
-        })?;
-        pass_entry.set_password(&password).map_err(|e| {
-            AppError::KeyringWithMessage("Failed to save credentials".into(), e.to_string())
-        })?;
+        save_password(&handle, &email, &password)?;
         let store = handle
             .store("data.json")
             .map_err(|e| AppError::Misc(format!("Failed to get store: {:?}", e)))?;
@@ -63,7 +55,11 @@ pub async fn login_new(
             existing_ids.push(value);
         }
         store.set("ids", Value::Array(existing_ids));
+        store
+            .save()
+            .map_err(|_| AppError::Misc("Failed to save the account list".into()))?;
     }
+    *sideloader_state.lock().unwrap() = Some(account);
     Ok(())
 }
 
@@ -75,15 +71,7 @@ pub async fn login_stored(
     anisette_server: String,
     sideloader_state: State<'_, SideloaderMutex>,
 ) -> Result<(), AppError> {
-    let pass_entry = Entry::new("iloader", &email).map_err(|e| {
-        AppError::KeyringWithMessage(
-            "Failed to create keyring entry for credentials".to_string(),
-            e.to_string(),
-        )
-    })?;
-    let password = pass_entry.get_password().map_err(|e| {
-        AppError::KeyringWithMessage("Failed to get credentials".to_string(), e.to_string())
-    })?;
+    let password = load_password(&handle, &email)?;
     let account = login(&handle, window, &email, &password, anisette_server).await?;
     let mut sideloader_guard = sideloader_state.lock().unwrap();
     *sideloader_guard = Some(account);
@@ -92,7 +80,8 @@ pub async fn login_stored(
 }
 
 #[tauri::command]
-pub fn delete_account(handle: AppHandle, email: String) -> Result<(), AppError> {
+pub async fn delete_account(handle: AppHandle, email: String) -> Result<(), AppError> {
+    delete_password(&handle, &email)?;
     let store = handle
         .store("data.json")
         .map_err(|e| AppError::Misc(format!("Failed to get store: {:?}", e)))?;
@@ -104,15 +93,9 @@ pub fn delete_account(handle: AppHandle, email: String) -> Result<(), AppError> 
         .unwrap_or_else(std::vec::Vec::new);
     existing_ids.retain(|v| v.as_str().is_none_or(|s| s != email));
     store.set("ids", Value::Array(existing_ids));
-    let pass_entry = Entry::new("iloader", &email).map_err(|e| {
-        AppError::KeyringWithMessage(
-            "Failed to create keyring entry for credentials".into(),
-            e.to_string(),
-        )
-    })?;
-    pass_entry.delete_credential().map_err(|e| {
-        AppError::KeyringWithMessage("Failed to delete credentials".into(), e.to_string())
-    })?;
+    store
+        .save()
+        .map_err(|_| AppError::Misc("Failed to save the account list".into()))?;
     Ok(())
 }
 
@@ -132,28 +115,8 @@ pub fn invalidate_account(sideloader_state: State<'_, SideloaderMutex>) {
 }
 
 #[tauri::command]
-pub fn reset_anisette_state() -> Result<bool, AppError> {
-    let state_entry = Entry::new("iloader", "anisette_state").map_err(|e| {
-        AppError::KeyringWithMessage(
-            "Failed to create keyring entry for anisette".into(),
-            e.to_string(),
-        )
-    })?;
-
-    match state_entry.delete_credential() {
-        Ok(_) => {
-            debug!("Anisette state deleted from keyring.");
-            Ok(true)
-        }
-        Err(keyring::Error::NoEntry) => {
-            debug!("No existing anisette state found in keyring, nothing to delete.");
-            Ok(false)
-        }
-        Err(e) => Err(AppError::KeyringWithMessage(
-            "Failed to delete anisette state".into(),
-            e.to_string(),
-        )),
-    }
+pub async fn reset_anisette_state(handle: AppHandle) -> Result<bool, AppError> {
+    delete_anisette(&handle)
 }
 
 async fn login(
