@@ -1,3 +1,5 @@
+> **iDroidLoader Android port:** [Download the signed Nightly APK](https://github.com/AvianJay/idroidloader/releases/tag/nightly) · [Android connection and build instructions](ANDROID.md). This community fork connects over Wi-Fi using an imported Lockdown pairing file. The desktop documentation below belongs to upstream iloader.
+
 <a href="https://iloader.app">
   <picture align="left" >
     <source media="(prefers-color-scheme: dark)" srcset="/iloader.svg">

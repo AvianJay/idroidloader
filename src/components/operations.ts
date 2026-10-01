@@ -88,3 +88,9 @@ export const sideloadOperation = {
     },
   ],
 };
+
+export const installSignedOperation: Operation = {
+  id: "install_signed",
+  titleKey: "network.install_signed",
+  steps: [{ id: "install", titleKey: "operations.sideload_step_install" }],
+};

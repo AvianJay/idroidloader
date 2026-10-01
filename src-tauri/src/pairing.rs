@@ -20,11 +20,12 @@ use plist_macro::{plist, plist_to_xml_bytes};
 use serde::Serialize;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_fs::{FsExt, OpenOptions};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 use crate::{
-    device::{DeviceInfo, DeviceInfoMutex, get_provider},
+    device::{DeviceInfo, DeviceInfoMutex, DeviceInfoWithPairing, get_provider, get_usb_provider},
     error::AppError,
     secure_storage::{create_sideloading_storage, keyring_available},
 };
@@ -224,7 +225,7 @@ pub async fn place_pairing_cmd(
         }
     };
 
-    let provider = get_provider(&device.info).await?;
+    let provider = get_provider(&device).await?;
 
     place_file(device.pairing, &provider, bundle_id, path).await
 }
@@ -251,16 +252,26 @@ pub async fn export_pairing_cmd(
         .set_title("Export Pairing File")
         .blocking_save_file();
 
-    if let Some(save_path) = save_path
-        && let Some(save_path) = save_path.as_path()
-    {
-        tokio::fs::write(save_path, &device.pairing)
-            .await
-            .map_err(|e| {
-                AppError::Filesystem("Failed to write pairing file".into(), e.to_string())
+    if let Some(save_path) = save_path {
+        tokio::task::spawn_blocking(move || {
+            use std::io::Write;
+            let mut options = OpenOptions::new();
+            options.write(true).create(true).truncate(true);
+            let mut file = app.fs().open(save_path, options).map_err(|_| {
+                AppError::Filesystem(
+                    "Failed to open pairing export".into(),
+                    "Select another destination".into(),
+                )
             })?;
-
-        Ok(())
+            file.write_all(&device.pairing).map_err(|_| {
+                AppError::Filesystem(
+                    "Failed to write pairing export".into(),
+                    "Check available storage".into(),
+                )
+            })
+        })
+        .await
+        .map_err(|_| AppError::Filesystem("Pairing export failed".into(), String::new()))?
     } else {
         Err(AppError::Canceled("Export".into()))
     }
@@ -310,7 +321,7 @@ pub async fn pairing_file(
     usbmuxd: &mut UsbmuxdConnection,
     cancel: CancellationToken,
 ) -> Result<Vec<u8>, AppError> {
-    let provider = get_provider(device).await?;
+    let provider = get_usb_provider(device).await?;
 
     let lockdown_plist = tokio::select! {
         _ = cancel.cancelled() => {
@@ -451,7 +462,7 @@ pub async fn installed_pairing_apps(
             None => return Err(AppError::NoDeviceSelected),
         }
     };
-    let provider = get_provider(&device.info).await?;
+    let provider = get_provider(&device).await?;
     let mut installation_proxy =
         InstallationProxyClient::connect(&provider)
             .await
@@ -499,7 +510,7 @@ pub async fn installed_pairing_apps(
 }
 
 pub async fn get_sidestore_info(
-    device: &DeviceInfo,
+    device: &DeviceInfoWithPairing,
     live_container: bool,
 ) -> Result<Option<PairingAppInfo>, AppError> {
     let provider = get_provider(device).await?;

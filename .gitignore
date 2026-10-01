@@ -27,3 +27,13 @@ keys
 *.mobileprovision
 
 dockerfile
+
+# Local Android/Rust build tools and deliverables
+.tools/
+artifacts/
+test-results/
+playwright-report/
+*.jks
+*.keystore
+.env
+.env.*

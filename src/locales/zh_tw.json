@@ -200,5 +200,21 @@
     "updating": "正在更新...",
     "downloaded_restarting": "更新已下載！正在重新啟動應用程式...",
     "failed_download": "下載更新失敗：{{error}}"
+  },
+  "network": {
+    "install_signed": "安裝已簽名的 IPA",
+    "title": "透過 Wi-Fi 連線",
+    "hint": "匯入現有配對檔，再輸入 iPhone 的 IP 位址。",
+    "address": "iPhone IP 位址",
+    "import_pairing": "匯入配對檔",
+    "replace_pairing": "選擇其他配對檔",
+    "pairing_ready": "已選擇配對檔",
+    "connect": "連線至 iPhone",
+    "connecting": "連線中…",
+    "connected": "已連線至 {{name}}",
+    "failed": "無法連線至 iPhone",
+    "import_failed": "無法選擇配對檔",
+    "disconnect": "中斷連線",
+    "requirements": "請使用同一個 Wi-Fi 網路。iPhone 必須仍信任這份配對檔，並已開啟 Wi-Fi 偵錯。配對憑證僅保留於本次工作階段的記憶體。"
   }
 }

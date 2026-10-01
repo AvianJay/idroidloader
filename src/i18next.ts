@@ -60,6 +60,12 @@ i18n
   .use(initReactI18next)
   .init({
     fallbackLng: "en",
+    detection: {
+      convertDetectedLanguage: (language: string) => {
+        const normalized = language.toLowerCase().replace(/-/g, "_");
+        return languages.some(([code]) => code === normalized) ? normalized : language.split("-")[0];
+      },
+    },
     interpolation: {
       escapeValue: false,
     },

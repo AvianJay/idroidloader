@@ -9,8 +9,12 @@ mod pairing;
 #[macro_use]
 mod secure_storage;
 mod error;
+mod input_file;
 mod logging;
+mod network;
 mod operation;
+#[cfg(any(mobile, test))]
+mod private_temp;
 
 use crate::{
     account::{
@@ -25,20 +29,36 @@ use crate::{
         place_pairing_cmd,
     },
     secure_storage::{force_disable_keyring, keyring_available},
-    sideload::{SideloaderMutex, install_sidestore_operation, sideload_operation},
+    sideload::{
+        SideloaderMutex, install_sidestore_operation, install_signed_operation, sideload_operation,
+    },
 };
+use network::connect_network_device;
 use tauri::Manager;
 use tracing_subscriber::{Layer, Registry, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install TLS crypto provider");
+    isideload::init().expect("Failed to initialize error reporting");
+    let builder = tauri::Builder::default();
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    builder
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .setup(|app| {
+            #[cfg(mobile)]
+            {
+                let cache = app.path().app_cache_dir()?.join("sideload");
+                std::fs::create_dir_all(&cache)?;
+                isideload_vfs::set_vfs(Box::new(private_temp::PrivateTempVfs(cache)));
+            }
             let log_dir = app
                 .path()
                 .app_data_dir()
@@ -110,7 +130,9 @@ pub fn run() {
             login_stored,
             delete_account,
             list_devices,
+            connect_network_device,
             sideload_operation,
+            install_signed_operation,
             set_selected_device,
             install_sidestore_operation,
             get_certificates,

@@ -214,6 +214,7 @@ export const AppleID = ({
                     saveCredentials: saveCredentials,
                     anisetteServer,
                   });
+                  setPasswordInput("");
                   setForceUpdateIds((v) => v + 1);
                 };
                 toast.promise(promise, {

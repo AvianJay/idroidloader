@@ -74,7 +74,7 @@ export const Settings = ({
     return log.level >= Number(logLevelFilter);
   });
 
-  const [lang, setLang] = useStore<string>("lang", "en");
+  const [lang, setLang] = useStore<string>("lang", i18n.resolvedLanguage ?? "en");
 
   useEffect(() => {
     i18n.changeLanguage(lang);
@@ -172,7 +172,7 @@ export const Settings = ({
           >
             {t("settings.reset_anisette_title")}
           </button>
-          <button
+          {platform !== "android" && platform !== "ios" && <button
             className="action-button danger"
             onClick={() => {
               if (!ensureSelectedDevice()) return;
@@ -183,7 +183,7 @@ export const Settings = ({
                   toast.promise(
                     async () => {
                       await invoke("delete_stored_rppairing");
-                      await invoke("set_selected_device");
+                      await invoke("set_selected_device", { device: null });
                       setSelectedDevice(null);
                     },
                     {
@@ -197,7 +197,7 @@ export const Settings = ({
             }}
           >
             {t("settings.delete_stored_rppairing")}
-          </button>
+          </button>}
           <button onClick={() => setLogsOpen(true)}>
             {t("settings.view_logs")}
             <span
@@ -262,7 +262,7 @@ export const Settings = ({
             )}
           </div>
         </Modal>
-        <div>
+        {platform !== "android" && platform !== "ios" && <div>
           <label className="settings-label">
             {t("settings.dont_use_keyring")}
             <input
@@ -276,7 +276,7 @@ export const Settings = ({
           <span className="settings-hint">
             {t("settings.dont_use_keyring_message")}
           </span>
-        </div>
+        </div>}
         {/* <div>
           <label className="settings-label">
             Allow App ID deletion:

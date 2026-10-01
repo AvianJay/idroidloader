@@ -245,8 +245,12 @@
         "Ensure your device is properly connected to your computer.",
         "Unplug and reconnect the device. If the issue persists, try a different USB port and cable."
       ],
-      "not_logged_in": ["Sign in to your Apple ID first."],
-      "no_device_selected": ["Select a device before continuing."],
+      "not_logged_in": [
+        "Sign in to your Apple ID first."
+      ],
+      "no_device_selected": [
+        "Select a device before continuing."
+      ],
       "anisette": [
         "Ensure your computer is connected to the internet.",
         "Change your anisette server. Try several different servers.",
@@ -282,5 +286,21 @@
     "updating": "Updating...",
     "downloaded_restarting": "Update downloaded! Restarting app...",
     "failed_download": "Failed to download update: {{error}}"
+  },
+  "network": {
+    "install_signed": "Install already-signed IPA",
+    "title": "Connect over Wi-Fi",
+    "hint": "Import an existing pairing file, then enter your iPhone's IP address.",
+    "address": "iPhone IP address",
+    "import_pairing": "Import pairing file",
+    "replace_pairing": "Choose another pairing file",
+    "pairing_ready": "Pairing file selected",
+    "connect": "Connect to iPhone",
+    "connecting": "Connecting…",
+    "connected": "Connected to {{name}}",
+    "failed": "Unable to connect to iPhone",
+    "import_failed": "Unable to select pairing file",
+    "disconnect": "Disconnect",
+    "requirements": "Use the same Wi-Fi network. iPhone must already trust this pairing and have Wi-Fi debugging enabled. Pairing credentials stay in memory for this session."
   }
 }

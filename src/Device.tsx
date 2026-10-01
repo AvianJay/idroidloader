@@ -6,16 +6,38 @@ import { useTranslation } from "react-i18next";
 import { Modal } from "./components/Modal";
 import { useError } from "./ErrorContext";
 import { AppError } from "./errors";
+import { NetworkDevice } from "./NetworkDevice";
+import { usePlatform } from "./PlatformContext";
 
 export type DeviceInfo = {
   name: string;
   id: number;
-  uuid: string;
+  udid: string;
   connectionType: "USB" | "Network" | "Unknown";
   version: string;
+  address?: string | null;
 };
 
-export const Device = ({
+export type DeviceProps = {
+  selectedDevice: DeviceInfo | null;
+  setSelectedDevice: (device: DeviceInfo | null) => void;
+  registerRefresh?: (fn?: () => void) => void;
+};
+
+export const Device = (props: DeviceProps) => {
+  const { platform } = usePlatform();
+  const mobile = platform === "android" || platform === "ios";
+  const [network, setNetwork] = useState(mobile);
+  return <>
+    {!mobile && <div className="connection-modes">
+      <button type="button" aria-pressed={!network} onClick={() => setNetwork(false)}>USB</button>
+      <button type="button" aria-pressed={network} onClick={() => setNetwork(true)}>Wi-Fi</button>
+    </div>}
+    {network ? <NetworkDevice {...props} /> : <UsbDevice {...props} />}
+  </>;
+};
+
+const UsbDevice = ({
   selectedDevice,
   setSelectedDevice,
   registerRefresh,

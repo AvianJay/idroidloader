@@ -9,6 +9,7 @@ import {
   sideloadOperation,
   installSideStoreOperation,
   installLiveContainerOperation,
+  installSignedOperation,
   Operation,
   OperationState,
   OperationUpdate,
@@ -185,7 +186,7 @@ function App() {
           <div className="title-block">
             <img src={logo} alt={t("app.logo_alt")} className="logo" />
             <div>
-              <h1 className="title">iloader</h1>
+              <h1 className="title">{platform === "android" ? "iDroidLoader" : "iloader"}</h1>
               <p className="subtitle">{t("subtitle")}</p>
             </div>
           </div>
@@ -381,6 +382,13 @@ function App() {
                 >
                   {t("app.import_ipa")}
                 </button>
+                <button onClick={async () => {
+                  if (!ensureSelectedDevice()) return;
+                  const path = await openFileDialog({ multiple: false,
+                    ...(platform === "android" ? {} : { filters: [{ name: t("app.ipa_files"), extensions: ["ipa"] }] }) });
+                  if (!path) return;
+                  await startOperation(installSignedOperation, { appPath: path }).catch(() => {});
+                }}>{t("network.install_signed")}</button>
               </div>
             </GlassCard>
           </section>

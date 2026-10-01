@@ -10,7 +10,11 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 use tokio_util::sync::CancellationToken;
 
-use crate::{error::AppError, pairing::pairing_file};
+use crate::{
+    error::AppError,
+    network::{DeviceProvider, tcp_provider},
+    pairing::pairing_file,
+};
 
 #[derive(Deserialize, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -20,6 +24,8 @@ pub struct DeviceInfo {
     pub udid: String,
     pub connection_type: String,
     pub version: String,
+    #[serde(default)]
+    pub address: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -111,6 +117,7 @@ pub async fn list_devices() -> Result<Vec<Result<DeviceInfo, AppError>>, AppErro
                     udid: d.udid.clone(),
                     connection_type,
                     version: version.to_string(),
+                    address: None,
                 })
             }
         })
@@ -128,6 +135,9 @@ pub async fn set_selected_device(
     device: Option<DeviceInfo>,
 ) -> Result<(), AppError> {
     if device.is_none() {
+        if let Some(token) = cancel_state.lock().unwrap().take() {
+            token.cancel();
+        }
         let mut device_state = device_state.lock().unwrap();
         *device_state = None;
         return Ok(());
@@ -177,7 +187,14 @@ pub async fn get_usbmuxd() -> Result<UsbmuxdConnection, AppError> {
         .map_err(|e| AppError::Usbmuxd("Failed to connect to usbmuxd".into(), e.to_string()))
 }
 
-pub async fn get_provider(device_info: &DeviceInfo) -> Result<UsbmuxdProvider, AppError> {
+pub async fn get_provider(device: &DeviceInfoWithPairing) -> Result<DeviceProvider, AppError> {
+    if let Some(address) = &device.info.address {
+        return Ok(DeviceProvider::Tcp(tcp_provider(address, &device.pairing)?));
+    }
+    Ok(DeviceProvider::Usb(get_usb_provider(&device.info).await?))
+}
+
+pub async fn get_usb_provider(device_info: &DeviceInfo) -> Result<UsbmuxdProvider, AppError> {
     get_provider_from_connection(device_info, &mut (get_usbmuxd().await?)).await
 }
 

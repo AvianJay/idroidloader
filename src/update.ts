@@ -3,8 +3,10 @@ import { ask } from "@tauri-apps/plugin-dialog";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { toast } from "sonner";
 import i18n from "./i18next";
+import { detectPlatform } from "./PlatformContext";
 
 export async function checkForUpdates() {
+  if (["android", "ios"].includes(detectPlatform())) return;
   const update = await check();
   if (update) {
     if (

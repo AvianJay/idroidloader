@@ -1,0 +1,23 @@
+<!doctype html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body><div id="root"></div><script type="module">
+import { mockIPC, mockWindows } from '/node_modules/@tauri-apps/api/mocks.js';
+window.testCalls = [];
+mockIPC((command, args) => {
+  window.testCalls.push({ command, args });
+  if (command === 'plugin:store|load') return 1;
+  if (command === 'plugin:store|keys') return [];
+  if (command === 'plugin:store|get') return [null, false];
+  if (command === 'plugin:app|version') return '2.3.4';
+  if (command === 'keyring_available') return false;
+  if (command === 'logged_in_as') return null;
+  if (command === 'plugin:dialog|open') return 'content://test-provider/pairing.plist';
+  if (command === 'connect_network_device') {
+    if (args.address === '192.168.1.99') throw { type: 'device_coms', message: 'Connection timed out' };
+    return { name: 'Test iPhone', id: 0, udid: 'test-udid', version: '18.0', connectionType: 'Network', address: args.address };
+  }
+  return null;
+}, { shouldMockEvents: true });
+mockWindows('main');
+await import('/src/main.tsx');
+</script></body></html>

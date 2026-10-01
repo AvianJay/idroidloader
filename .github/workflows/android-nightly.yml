@@ -1,0 +1,166 @@
+name: Android Nightly
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      NDK_VERSION: 28.2.13676358
+      IDROID_NIGHTLY_BUILD: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          cache-on-failure: true
+
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools platforms;android-36 build-tools;36.0.0 ndk;28.2.13676358
+          log-accepted-android-sdk-licenses: false
+
+      - name: Configure Android environment
+        shell: pwsh
+        run: |
+          $ndkPath = Join-Path $env:ANDROID_HOME "ndk/$env:NDK_VERSION"
+          "NDK_HOME=$ndkPath" >> $env:GITHUB_ENV
+          "KEYSTORE_FILE=$env:RUNNER_TEMP/idroidloader-signing.keystore" >> $env:GITHUB_ENV
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Initialize Android build files
+        shell: pwsh
+        run: |
+          npm run tauri -- android init --ci --skip-targets-install
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # CLI 2.11 regenerates an older BuildTask; retain the checked-in Gradle 9 template.
+          git restore --worktree -- src-tauri/gen/android
+
+      - name: Check nightly release publisher
+        run: node --test tests/nightly-release.test.cjs
+
+      - name: Check mobile interface
+        run: |
+          npx playwright install chromium
+          npm run test:ui
+
+      - name: Restore signing keystore
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.repository == 'AvianJay/idroidloader'
+        shell: pwsh
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          foreach ($name in @('KEYSTORE_BASE64', 'KEYSTORE_ALIAS', 'KEYSTORE_PASSWORD')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "Missing required signing secret: $name"
+            }
+          }
+          try {
+            [IO.File]::WriteAllBytes($env:KEYSTORE_FILE, [Convert]::FromBase64String($env:KEYSTORE_BASE64))
+          } catch {
+            throw 'Unable to decode KEYSTORE_BASE64 into a signing keystore.'
+          }
+
+      - name: Build signed release APK
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.repository == 'AvianJay/idroidloader'
+        shell: pwsh
+        env:
+          KEYSTORE_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          npm run tauri -- android build --target aarch64 --apk --ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $source = 'src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk'
+          New-Item -ItemType Directory -Path artifacts -Force | Out-Null
+          Copy-Item -LiteralPath $source -Destination artifacts/iDroidLoader-arm64.apk
+          $signer = Join-Path $env:ANDROID_HOME 'build-tools/36.0.0/apksigner.bat'
+          & $signer verify --verbose artifacts/iDroidLoader-arm64.apk
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $digest = (Get-FileHash artifacts/iDroidLoader-arm64.apk -Algorithm SHA256).Hash.ToLower()
+          Set-Content -LiteralPath artifacts/iDroidLoader-arm64.apk.sha256 -Encoding ascii -Value "$digest  iDroidLoader-arm64.apk"
+
+      - name: Build unsigned-test debug APK
+        if: github.event_name == 'pull_request' || github.ref != 'refs/heads/main' || github.repository != 'AvianJay/idroidloader'
+        shell: pwsh
+        run: |
+          # Pull requests use Android's debug key and never receive release secrets.
+          Remove-Item Env:KEYSTORE_FILE -ErrorAction SilentlyContinue
+          powershell -ExecutionPolicy Bypass -File scripts/android.ps1 Build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Remove signing keystore
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:KEYSTORE_FILE -and (Test-Path -LiteralPath $env:KEYSTORE_FILE)) {
+            Remove-Item -LiteralPath $env:KEYSTORE_FILE -Force
+          }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: android-${{ github.run_number }}
+          path: artifacts/*.apk*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.repository == 'AvianJay/idroidloader'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: android-${{ github.run_number }}
+          path: artifacts
+
+      - name: Update the single nightly release
+        uses: actions/github-script@v9
+        env:
+          IDROID_NIGHTLY_BUILD: ${{ github.run_number }}
+        with:
+          script: |
+            const publish = require('./.github/scripts/publish-nightly.cjs');
+            await publish({ github, context, core });

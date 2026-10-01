@@ -1,4 +1,5 @@
 import type { TFunction } from "i18next";
+import type { Platform } from "./PlatformContext";
 
 export const errorSuggestionKeys = {
   underage: ["error.suggestions.underage"],
@@ -69,7 +70,7 @@ const dedupeSuggestions = (suggestions: string[]) => {
 const getSuggestionBlock = (
   t: TFunction,
   key: string,
-  platform: "mac" | "windows" | "linux",
+  platform: Platform,
   anisetteServer: string,
 ) => {
   const rawSuggestions = t(key, {
@@ -117,7 +118,7 @@ const getSuggestionBlock = (
 export const getErrorSuggestions = (
   t: TFunction,
   type: ErrorVariant,
-  platform: "mac" | "windows" | "linux",
+  platform: Platform,
   anisetteServer: string,
 ): string[] => {
   return dedupeSuggestions(
