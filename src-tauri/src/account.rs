@@ -152,6 +152,7 @@ async fn login(
         }
     };
 
+    let anisette_server = anisette_server.trim().to_string();
     let anisette_url = if !anisette_server.starts_with("http") {
         format!("https://{}", anisette_server)
     } else {

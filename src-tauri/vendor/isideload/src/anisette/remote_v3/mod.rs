@@ -48,7 +48,7 @@ impl RemoteV3AnisetteProvider {
     ) -> Result<Self, Report> {
         Ok(Self {
             state: None,
-            url: url.to_string(),
+            url: url.trim().trim_end_matches('/').to_string(),
             storage,
             serial_number,
             client: Self::build_reqwest_client(None)?,
@@ -65,17 +65,19 @@ impl RemoteV3AnisetteProvider {
     fn build_reqwest_client(
         websocket_proxy: Option<String>,
     ) -> Result<reqwest_middleware::ClientWithMiddleware, Report> {
+        let builder = ClientBuilder::new();
+        #[cfg(not(feature = "wasm"))]
+        let builder = builder
+            .timeout(std::time::Duration::from_secs(30))
+            .connect_timeout(std::time::Duration::from_secs(10));
+        let client = builder.build()?;
         if let Some(websocket_proxy) = websocket_proxy {
             use crate::auth::middleware::WasmProxyMiddleware;
-
-            let client = ClientBuilder::new().build()?;
 
             Ok(MwClientBuilder::new(client)
                 .with(WasmProxyMiddleware::new(websocket_proxy))
                 .build())
         } else {
-            let client = ClientBuilder::new().build()?;
-
             Ok(MwClientBuilder::new(client).build())
         }
     }
@@ -89,7 +91,7 @@ impl RemoteV3AnisetteProvider {
     }
 
     pub fn set_url(mut self, url: &str) -> RemoteV3AnisetteProvider {
-        self.url = url.to_string();
+        self.url = url.trim().trim_end_matches('/').to_string();
         self
     }
 
@@ -101,6 +103,40 @@ impl RemoteV3AnisetteProvider {
     pub fn set_serial_number(mut self, serial_number: String) -> RemoteV3AnisetteProvider {
         self.serial_number = serial_number;
         self
+    }
+
+    async fn request_headers(&self, body: String) -> Result<reqwest::Response, Report> {
+        let request = || {
+            self.client
+                .post(format!("{}/v3/get_headers", self.url))
+                .header(CONTENT_TYPE, "application/json")
+                .body(body.clone())
+        };
+        let response = request().send().await;
+        #[cfg(not(feature = "wasm"))]
+        let response = match response {
+            Err(error) if error.is_connect() || error.is_timeout() || error.is_request() => {
+                // This endpoint only generates headers for an existing identity;
+                // retry the same v3 request once, without changing provisioning state.
+                info!("Anisette transport failed; retrying v3 headers once");
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                request().send().await
+            }
+            response => response,
+        };
+        response
+            .map_err(|error| match error {
+                // Unwrap middleware for the existing reqwest error formatter. Custom
+                // server URLs may contain credentials/tokens and must be stripped.
+                reqwest_middleware::Error::Reqwest(error) => {
+                    report!(error.without_url()).into_dynamic()
+                }
+                reqwest_middleware::Error::Middleware(_) => {
+                    report!("Anisette request middleware failed")
+                }
+            })
+            .context("Failed to get anisette headers (v3 POST)")
+            .map_err(|report| report.into_dynamic())
     }
 }
 
@@ -119,17 +155,13 @@ impl AnisetteProvider for RemoteV3AnisetteProvider {
         let client_info = self.get_client_info().await?;
 
         let headers = self
-            .client
-            .post(format!("{}/v3/get_headers", self.url))
-            .header(CONTENT_TYPE, "application/json")
-            .body(
+            .request_headers(
                 serde_json::json!({
                 "identifier": BASE64_STANDARD.encode(state.keychain_identifier),
                 "adi_pb": BASE64_STANDARD.encode(adi_pb)
                 })
                 .to_string(),
             )
-            .send()
             .await?
             .error_for_status()?
             .json::<AnisetteHeaders>()
@@ -273,7 +305,9 @@ impl RemoteV3AnisetteProvider {
         debug!("Connected to provisioning socket");
 
         loop {
-            let Some(msg) = ws.next().await else { continue };
+            let Some(msg) = ws.next().await else {
+                bail!("Provisioning socket closed unexpectedly");
+            };
             let msg = msg?;
 
             let text = match msg {
@@ -281,7 +315,8 @@ impl RemoteV3AnisetteProvider {
                 WsMessage::Text(t) => t,
             };
 
-            debug!("Received provisioning message: {}", text);
+            // Provisioning frames contain ADI/key material; never log their contents.
+            debug!("Received provisioning message");
             let provision_msg: ProvisioningMessage = serde_json::from_str(&text)?;
 
             match provision_msg {
@@ -415,4 +450,105 @@ enum AnisetteHeaders {
         #[serde(rename = "X-Apple-I-MD-RINFO")]
         routing_info: String,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::util::storage::InMemoryStorage;
+
+    #[test]
+    fn retries_dropped_post_without_changing_body_or_identity() {
+        use std::io::{Read, Write};
+        let socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = socket.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let mut bodies = Vec::new();
+            for attempt in 0..2 {
+                let (mut stream, _) = socket.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                    .unwrap();
+                let mut request = Vec::new();
+                let (header_end, length) = loop {
+                    let mut buffer = [0; 1024];
+                    let count = stream.read(&mut buffer).unwrap();
+                    assert!(count > 0, "request closed before headers");
+                    request.extend_from_slice(&buffer[..count]);
+                    assert!(request.len() < 4096);
+                    if let Some(end) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+                        let headers = String::from_utf8_lossy(&request[..end]);
+                        assert!(headers.starts_with("POST /v3/get_headers HTTP/1.1\r\n"));
+                        let length = headers
+                            .lines()
+                            .find_map(|line| {
+                                let (name, value) = line.split_once(':')?;
+                                name.eq_ignore_ascii_case("content-length")
+                                    .then(|| value.trim().parse::<usize>().unwrap())
+                            })
+                            .unwrap();
+                        break (end + 4, length);
+                    }
+                };
+                while request.len() < header_end + length {
+                    let mut buffer = [0; 1024];
+                    let count = stream.read(&mut buffer).unwrap();
+                    assert!(count > 0, "request closed before body");
+                    request.extend_from_slice(&buffer[..count]);
+                }
+                bodies.push(request[header_end..header_end + length].to_vec());
+                if attempt == 1 {
+                    let body = r#"{"result":"Headers","X-Apple-I-MD-M":"fixture-mdm","X-Apple-I-MD":"fixture-otp","X-Apple-I-MD-RINFO":"17106176"}"#;
+                    write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+                }
+            }
+            assert_eq!(bodies[0], bodies[1]);
+        });
+        let mut provider = RemoteV3AnisetteProvider::new(
+            &format!(" http://{address}/ "),
+            Box::new(InMemoryStorage::new()),
+            "0".into(),
+        )
+        .unwrap();
+        provider.state = Some(AnisetteState {
+            keychain_identifier: [0; 16],
+            adi_pb: Some(Vec::new()),
+        });
+        let headers = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(provider.get_anisette_data())
+            .unwrap()
+            .get_headers();
+        assert_eq!(headers["X-Apple-I-MD"], "fixture-otp");
+        assert_eq!(provider.state.unwrap().keychain_identifier, [0; 16]);
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn transport_error_keeps_cause_without_url_credentials() {
+        crate::init().expect("error formatter installs");
+        let socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = socket.local_addr().unwrap().port();
+        drop(socket);
+        let mut provider = RemoteV3AnisetteProvider::new(
+            &format!("https://fixture-user:fixture-password@127.0.0.1:{port}/?token=fixture-token"),
+            Box::new(InMemoryStorage::new()),
+            "0".into(),
+        )
+        .unwrap();
+        provider.state = Some(AnisetteState {
+            keychain_identifier: [0; 16],
+            adi_pb: Some(Vec::new()),
+        });
+        let error = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(provider.get_anisette_data())
+            .unwrap_err();
+        let rendered = error.to_string();
+        assert!(rendered.contains("Failed to get anisette headers (v3 POST)"));
+        assert!(rendered.contains("Caused by:"));
+        for secret in ["fixture-user", "fixture-password", "fixture-token"] {
+            assert!(!rendered.contains(secret), "request URL was not redacted");
+        }
+    }
 }
