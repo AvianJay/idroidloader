@@ -233,7 +233,7 @@ pub async fn connect_network_device(
                 })??;
         if crate::wireless::is_remote_record(&bytes)? {
             let _network = crate::wireless::WirelessNetworkGuard::acquire(&app)?;
-            return crate::wireless::connect_record(bytes, Some(&address)).await;
+            return Box::pin(crate::wireless::connect_record(bytes, Some(&address))).await;
         }
         let provider = DeviceProvider::Tcp(tcp_provider(&address, &bytes)?);
         let mut client = LockdownClient::connect(&provider).await.map_err(|_| {

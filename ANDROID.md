@@ -68,7 +68,7 @@ powershell -ExecutionPolicy Bypass -File scripts/android.ps1 Test
 - Built the ARM64 debug APK, verified its Android signature, and confirmed it packages the ARM64 native library.
 - Installed and cold-started the APK on an Android 16 emulator with ARM64 translation.
 - Used the real Android document picker to import an incomplete plist. The native backend read the content URI and returned the expected missing-certificate error.
-- Passed 21 idevice transport tests and 12 application Rust tests, including a correct and incorrect PIN exchange, rejection of invalid TLS-PSK Finished proofs, authenticated discovery filtering, dual-stack listeners, incomplete pairing records, and cancellation ordering.
+- Passed 21 idevice transport tests and 13 application Rust tests, including a correct and incorrect PIN exchange, rejection of invalid TLS-PSK Finished proofs, authenticated discovery filtering, dual-stack listeners, incomplete pairing records, cancellation ordering, and a mobile future-size budget.
 - Passed 7 mobile browser UI tests, covering saved logins, imported pairing, wireless pairing progress, PIN clearing, cancellation, retry, and preserving an existing selection. Browser tests use mocked account/device responses; they do not validate Apple authentication or iPhone communication.
 - Passed an Android wireless smoke test through the packaged interface and native backend: an actual mDNS host announcement, screen-awake acquisition, cancellation, and resource release. It does not simulate a paired iPhone.
 - Passed 5 Android instrumentation checks using isolated public fixtures: encrypted writes/overwrites, deletion, ciphertext tampering/record substitution, missing encryption keys, and retrieval in a new process after a forced stop.

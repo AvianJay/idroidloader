@@ -342,16 +342,16 @@ pub async fn connect_record(
         .map_err(|_| failure("Invalid iPhone IP address"))?;
     let (stream, address) = find_device(record.alt_irk.as_deref().unwrap(), expected).await?;
     let mut control = RemotePairingClient::new(RpPairingSocket::new(stream), HOST_NAME);
-    control
-        .attempt_pair_verify()
+    Box::pin(control.attempt_pair_verify())
         .await
         .map_err(|_| failure("Unable to negotiate RemotePairing"))?;
     // Do not fall back to pair-setup with a guessed/all-zero PIN.
-    control.validate_pairing(&mut record).await.map_err(|_| {
-        failure("iPhone rejected the RemotePairing record. Pair again from Developer Mode")
-    })?;
-    let tunnel_port = control
-        .create_tcp_listener()
+    Box::pin(control.validate_pairing(&mut record))
+        .await
+        .map_err(|_| {
+            failure("iPhone rejected the RemotePairing record. Pair again from Developer Mode")
+        })?;
+    let tunnel_port = Box::pin(control.create_tcp_listener())
         .await
         .map_err(|_| failure("iPhone could not open an authenticated tunnel"))?;
     let mut tunnel_address = address;
@@ -359,9 +359,14 @@ pub async fn connect_record(
     let stream = TcpStream::connect(tunnel_address)
         .await
         .map_err(|_| failure("Unable to connect to iPhone tunnel"))?;
-    let tunnel = connect_tls_psk_tunnel_native(stream, control.encryption_key())
-        .await
-        .map_err(|_| failure("Unable to authenticate iPhone tunnel"))?;
+    // The TLS handshake has a large future. Allocate it on the heap so it is
+    // not copied into Android's small JavaBridge IPC thread stack.
+    let tunnel = Box::pin(connect_tls_psk_tunnel_native(
+        stream,
+        control.encryption_key(),
+    ))
+    .await
+    .map_err(|_| failure("Unable to authenticate iPhone tunnel"))?;
     let client_ip = tunnel
         .info
         .client_address
@@ -377,29 +382,30 @@ pub async fn connect_record(
     if rsd_port == 0 || mtu < 1280 {
         return Err(failure("Invalid iPhone tunnel parameters"));
     }
-    let mut adapter = Adapter::new(Box::new(tunnel.into_inner()), client_ip, server_ip);
+    // Adapter also owns a 64 KiB receive buffer; do not embed it in this future.
+    let mut adapter = Box::new(Adapter::new(
+        Box::new(tunnel.into_inner()),
+        client_ip,
+        server_ip,
+    ));
     adapter.set_mss(mtu.saturating_sub(60));
-    let mut handle = adapter.to_async_handle();
-    let rsd = RsdHandshake::new(
-        handle
-            .connect(rsd_port)
-            .await
-            .map_err(|_| failure("Unable to connect to iPhone service discovery"))?,
-    )
-    .await
-    .map_err(|_| failure("Unable to read iPhone services"))?;
+    let mut handle = (*adapter).to_async_handle();
+    let rsd =
+        Box::pin(RsdHandshake::new(handle.connect(rsd_port).await.map_err(
+            |_| failure("Unable to connect to iPhone service discovery"),
+        )?))
+        .await
+        .map_err(|_| failure("Unable to read iPhone services"))?;
     let remote = Arc::new(RemoteConnection {
         services: Mutex::new(RemoteServices { handle, rsd }),
         _control: Mutex::new(control),
     });
-    let mut lockdown = remote
-        .service::<LockdownClient>()
+    let mut lockdown = Box::pin(remote.service::<LockdownClient>())
         .await
         .map_err(|_| failure("iPhone does not expose RemotePairing device information"))?;
     let mut values = Vec::new();
     for key in ["DeviceName", "ProductVersion", "UniqueDeviceID"] {
-        let value = lockdown
-            .get_value(Some(key), None)
+        let value = Box::pin(lockdown.get_value(Some(key), None))
             .await
             .map_err(|_| failure("Unable to read paired iPhone information"))?;
         values.push(
@@ -438,7 +444,9 @@ pub async fn pair_wireless_device(
     if let Some(old) = cancel_state.lock().unwrap().replace(token.clone()) {
         old.cancel();
     }
-    let query = async {
+    // Keep the command's future small before Tauri moves it from JavaBridge
+    // onto the async runtime. RemotePairing has large nested protocol futures.
+    let query = Box::pin(async {
         let _network = WirelessNetworkGuard::acquire(&app)?;
         let info = PairableHostInfo::generate(HOST_NAME, "Mac17,7");
         // Generate distinct identities for concurrently replaced attempts.
@@ -479,10 +487,10 @@ pub async fn pair_wireless_device(
         on_status
             .send(WirelessStatus::Connecting)
             .map_err(|_| AppError::Canceled("Wireless pairing".into()))?;
-        let selected = tokio::time::timeout(Duration::from_secs(40), connect_record(record.to_bytes(), None)).await
+        let selected = tokio::time::timeout(Duration::from_secs(40), Box::pin(connect_record(record.to_bytes(), None))).await
             .map_err(|_| failure("Paired successfully, but opening the iPhone tunnel timed out. Pair again and keep iPhone unlocked"))??;
         Ok::<_, AppError>(selected)
-    };
+    });
     let result = tokio::select! {
         _ = token.cancelled() => Err(AppError::Canceled("Wireless pairing".into())),
         result = tokio::time::timeout(Duration::from_secs(180), query) => result.unwrap_or_else(|_| Err(failure("Wireless pairing timed out. Open Developer Mode on iOS 27 or newer and try again"))),
@@ -534,6 +542,15 @@ impl Drop for WirelessNetworkGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn tunnel_future_fits_mobile_dispatch_stack() {
+        let future = connect_record(Vec::new(), None);
+        assert!(
+            std::mem::size_of_val(&future) < 64 * 1024,
+            "Tunnel future exceeds the mobile stack budget: {} bytes",
+            std::mem::size_of_val(&future)
+        );
+    }
     #[test]
     fn cancel_before_start_and_stale_cancels_are_safe() {
         let attempts = WirelessAttempts::default();
