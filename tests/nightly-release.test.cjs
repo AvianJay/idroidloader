@@ -56,11 +56,16 @@ function fixture({ existing = false, draft = false, failUpload = 0, denied = fal
   const github = {
     rest: { repos, git: {
       getRef: async ({ ref }) => {
+        if (ref === 'tags/nightly') {
+          if (!state.tag) throw notFound();
+          return { data: { object: { sha: state.tag } } };
+        }
         assert.equal(ref, 'heads/main');
         return { data: { object: { sha: state.head } } };
       },
       updateRef: async args => {
-        if (!state.tag) throw notFound();
+        // GitHub returns 422, rather than 404, when PATCH targets a missing ref.
+        if (!state.tag) throw Object.assign(new Error('Reference does not exist'), { status: 422 });
         state.refs.push(args);
         state.tag = args.sha;
       },

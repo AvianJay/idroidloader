@@ -68,10 +68,16 @@ module.exports = async function publish({ github, context, core, readFile = fs.r
   }
 
   // Move only our rolling tag; the branch and other releases are never rewritten.
+  let tagExists = true;
   try {
-    await github.rest.git.updateRef({ ...repo, ref: `tags/${tag}`, sha: context.sha, force: true });
+    await github.rest.git.getRef({ ...repo, ref: `tags/${tag}` });
   } catch (error) {
     if (error.status !== 404) throw error;
+    tagExists = false;
+  }
+  if (tagExists) {
+    await github.rest.git.updateRef({ ...repo, ref: `tags/${tag}`, sha: context.sha, force: true });
+  } else {
     await github.rest.git.createRef({ ...repo, ref: `refs/tags/${tag}`, sha: context.sha });
   }
   await github.rest.repos.updateRelease({
