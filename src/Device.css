@@ -60,6 +60,10 @@
 .network-form { display: grid; gap: .7rem; }
 .network-form input { min-width: 0; width: 100%; box-sizing: border-box; }
 .pairing-file-ready { color: #7bdba3; font-size: .9rem; }
+.wireless-pair { display: grid; gap: .65rem; padding: 1rem; border: 1px solid var(--border-color, #3a3a3a); border-radius: 14px; }
+.wireless-pair h3, .wireless-pair p { margin: 0; }
+.wireless-instructions { margin: 0; padding-left: 1.3rem; line-height: 1.6; }
+.wireless-pin { display: block; margin-top: .65rem; font: 700 clamp(1.8rem, 7vw, 2.6rem) monospace; letter-spacing: .18em; text-align: center; }
 
 @media (max-width: 480px) {
   .network-device .device-card { flex-wrap: wrap; }

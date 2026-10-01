@@ -33,6 +33,8 @@ pub struct DeviceInfo {
 pub struct DeviceInfoWithPairing {
     pub info: DeviceInfo,
     pub pairing: Vec<u8>,
+    #[serde(skip)]
+    pub remote: Option<std::sync::Arc<crate::wireless::RemoteConnection>>,
 }
 
 pub type DeviceInfoMutex = Mutex<Option<DeviceInfoWithPairing>>;
@@ -166,6 +168,7 @@ pub async fn set_selected_device(
     let device_with_pairing = DeviceInfoWithPairing {
         info: device.unwrap(),
         pairing,
+        remote: None,
     };
     let mut device_state = device_state.lock().unwrap();
     *device_state = Some(device_with_pairing);
@@ -188,6 +191,9 @@ pub async fn get_usbmuxd() -> Result<UsbmuxdConnection, AppError> {
 }
 
 pub async fn get_provider(device: &DeviceInfoWithPairing) -> Result<DeviceProvider, AppError> {
+    if let Some(remote) = &device.remote {
+        return Ok(DeviceProvider::Remote(remote.clone()));
+    }
     if let Some(address) = &device.info.address {
         return Ok(DeviceProvider::Tcp(tcp_provider(address, &device.pairing)?));
     }

@@ -216,5 +216,20 @@
     "import_failed": "無法選擇配對檔",
     "disconnect": "中斷連線",
     "requirements": "請使用同一個 Wi-Fi 網路。iPhone 必須仍信任這份配對檔，並已開啟 Wi-Fi 偵錯。配對憑證僅保留於本次工作階段的記憶體。"
+  },
+  "wireless": {
+    "starting": "正在啟動無線裝置探索…",
+    "title": "無線配對（iOS 27+）",
+    "requirements": "iPhone 需使用 iOS 27 以上並啟用開發者模式。兩支手機連上同一個 Wi-Fi，即可免電腦、免匯入配對檔開始配對。",
+    "start": "開始無線配對",
+    "step_settings": "在 iPhone 開啟「設定 → 隱私權與安全性 → 開發者模式」。",
+    "step_select": "在可配對的主機中選擇 iDroidLoader。",
+    "step_pin": "將這裡顯示的配對碼輸入 iPhone，然後等待連線完成。",
+    "waiting": "等待 iPhone 選擇 iDroidLoader…",
+    "pin_hint": "請在 iPhone 輸入這組配對碼。",
+    "pin_label": "配對碼",
+    "connecting": "配對已接受，正在連線到 iPhone…",
+    "cancel": "取消無線配對",
+    "failed": "無線配對失敗"
   }
 }

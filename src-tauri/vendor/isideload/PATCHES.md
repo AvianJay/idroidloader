@@ -18,3 +18,8 @@ provisioning stream now fails instead of spinning, and provisioning frames are
 never logged because they contain ADI/key material. The v3 protocol and stored
 device identity are retained; the root endpoint is the shared v1 API, not a
 replacement for `/v3/get_headers`.
+
+RemotePairing installation patch: expose `Sideloader::install_app_rsd` to sign
+against the authenticated device identity and install through the existing RSD
+installer. It retains device registration and signed-file cleanup behavior.
+Legacy USB/Lockdown installation remains available.

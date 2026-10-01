@@ -77,6 +77,11 @@ jobs:
       - name: Check Anisette error reporting
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --package isideload --lib
 
+      - name: Check wireless pairing transport
+        run: |
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --package idevice --no-default-features --features ring,remote_pairing --lib
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --package iloader --lib
+
       - name: Check mobile interface
         run: |
           npx playwright install chromium

@@ -302,5 +302,20 @@
     "import_failed": "Unable to select pairing file",
     "disconnect": "Disconnect",
     "requirements": "Use the same Wi-Fi network. iPhone must already trust this pairing and have Wi-Fi debugging enabled. Pairing credentials stay in memory for this session."
+  },
+  "wireless": {
+    "starting": "Starting wireless discovery…",
+    "title": "Wireless pairing (iOS 27+)",
+    "requirements": "Use iOS 27 or newer with Developer Mode enabled. Keep Android and iPhone on the same Wi-Fi. No computer or pairing file is needed.",
+    "start": "Pair wirelessly",
+    "step_settings": "On iPhone, open Settings → Privacy & Security → Developer Mode.",
+    "step_select": "Select iDroidLoader in the available pairing hosts.",
+    "step_pin": "Enter the code shown here on iPhone, then wait for connection.",
+    "waiting": "Waiting for iPhone to select iDroidLoader…",
+    "pin_hint": "Enter this code on your iPhone.",
+    "pin_label": "Pairing code",
+    "connecting": "Pairing accepted. Connecting to iPhone…",
+    "cancel": "Cancel wireless pairing",
+    "failed": "Wireless pairing failed"
   }
 }

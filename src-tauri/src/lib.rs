@@ -4,6 +4,8 @@ mod account;
 mod android_storage;
 #[cfg(target_os = "android")]
 mod android_tls;
+#[cfg(target_os = "android")]
+mod android_wireless;
 #[macro_use]
 mod device;
 #[macro_use]
@@ -19,6 +21,7 @@ mod network;
 mod operation;
 #[cfg(any(mobile, test))]
 mod private_temp;
+mod wireless;
 
 use crate::{
     account::{
@@ -50,6 +53,8 @@ pub fn run() {
     let builder = tauri::Builder::default();
     #[cfg(target_os = "android")]
     let builder = builder.plugin(android_storage::init());
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(android_wireless::init());
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     builder
@@ -85,10 +90,10 @@ pub fn run() {
                 .with_writer(file_appender)
                 .with_target(true)
                 .with_ansi(false)
-                .with_filter(tracing_subscriber::filter::LevelFilter::DEBUG);
+                .with_filter(tracing_subscriber::filter::filter_fn(safe_log_metadata));
 
             let frontend_layer = logging::FrontendLoggingLayer::new(app.handle().clone())
-                .with_filter(tracing_subscriber::filter::LevelFilter::DEBUG);
+                .with_filter(tracing_subscriber::filter::filter_fn(safe_log_metadata));
 
             Registry::default()
                 .with(file_layer)
@@ -127,6 +132,7 @@ pub fn run() {
             app.manage(DeviceInfoMutex::new(None));
             app.manage(SideloaderMutex::new(None));
             app.manage(PairingCancelToken::new(None));
+            app.manage(wireless::WirelessAttempts::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -137,6 +143,8 @@ pub fn run() {
             delete_account,
             list_devices,
             connect_network_device,
+            wireless::pair_wireless_device,
+            wireless::cancel_wireless_pairing,
             sideload_operation,
             install_signed_operation,
             set_selected_device,
@@ -157,4 +165,16 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+fn safe_log_metadata(metadata: &tracing::Metadata<'_>) -> bool {
+    // idevice's Debug/Trace events include decrypted pairing messages and keys.
+    // Apply to both persistent and frontend logging, including library calls.
+    let limit =
+        if metadata.target().starts_with("idevice") || metadata.target().starts_with("jktcp") {
+            tracing::Level::WARN
+        } else {
+            tracing::Level::DEBUG
+        };
+    *metadata.level() <= limit
 }

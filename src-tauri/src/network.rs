@@ -1,7 +1,7 @@
 use std::{future::Future, net::IpAddr, pin::Pin, time::Duration};
 
 use idevice::{
-    Idevice, IdeviceError, IdeviceService,
+    Idevice, IdeviceError, IdeviceService, RsdService,
     lockdown::LockdownClient,
     pairing_file::PairingFile,
     provider::{IdeviceProvider, TcpProvider, UsbmuxdProvider},
@@ -19,6 +19,7 @@ use crate::{
 pub enum DeviceProvider {
     Usb(UsbmuxdProvider),
     Tcp(TcpProvider),
+    Remote(std::sync::Arc<crate::wireless::RemoteConnection>),
 }
 
 // PairingFile contains private keys. Never delegate Debug to TcpProvider.
@@ -27,6 +28,7 @@ impl std::fmt::Debug for DeviceProvider {
         f.write_str(match self {
             Self::Usb(_) => "UsbProvider",
             Self::Tcp(_) => "TcpProvider",
+            Self::Remote(_) => "RemoteProvider",
         })
     }
 }
@@ -39,6 +41,7 @@ impl IdeviceProvider for DeviceProvider {
         let connection = match self {
             Self::Usb(provider) => provider.connect(port),
             Self::Tcp(provider) => provider.connect(port),
+            Self::Remote(_) => Box::pin(async { Err(IdeviceError::ServiceNotFound) }),
         };
         Box::pin(async move {
             tokio::time::timeout(Duration::from_secs(15), connection)
@@ -55,6 +58,7 @@ impl IdeviceProvider for DeviceProvider {
         match self {
             Self::Usb(provider) => provider.label(),
             Self::Tcp(provider) => provider.label(),
+            Self::Remote(_) => "iDroidLoader Wireless",
         }
     }
     fn get_pairing_file(
@@ -63,6 +67,23 @@ impl IdeviceProvider for DeviceProvider {
         match self {
             Self::Usb(provider) => provider.get_pairing_file(),
             Self::Tcp(provider) => provider.get_pairing_file(),
+            Self::Remote(_) => Box::pin(async { Err(IdeviceError::ServiceNotFound) }),
+        }
+    }
+}
+
+impl DeviceProvider {
+    pub async fn service<T: IdeviceService + RsdService>(&self) -> Result<T, IdeviceError> {
+        match self {
+            Self::Remote(remote) => remote.service::<T>().await,
+            _ => T::connect(self).await,
+        }
+    }
+
+    pub async fn install_signed(&self, path: &std::path::Path) -> Result<(), rootcause::Report> {
+        match self {
+            Self::Remote(remote) => remote.install_signed(path).await,
+            _ => isideload::sideload::install::install_app(self, path, |_| {}).await,
         }
     }
 }
@@ -203,9 +224,17 @@ pub async fn connect_network_device(
         }
     }
     let query = async {
-        let bytes = tokio::task::spawn_blocking(move || read_pairing_input(&app, pairing_path))
-            .await
-            .map_err(|_| AppError::Filesystem("Pairing import failed".into(), String::new()))??;
+        let file_app = app.clone();
+        let bytes =
+            tokio::task::spawn_blocking(move || read_pairing_input(&file_app, pairing_path))
+                .await
+                .map_err(|_| {
+                    AppError::Filesystem("Pairing import failed".into(), String::new())
+                })??;
+        if crate::wireless::is_remote_record(&bytes)? {
+            let _network = crate::wireless::WirelessNetworkGuard::acquire(&app)?;
+            return crate::wireless::connect_record(bytes, Some(&address)).await;
+        }
         let provider = DeviceProvider::Tcp(tcp_provider(&address, &bytes)?);
         let mut client = LockdownClient::connect(&provider).await.map_err(|_| {
             AppError::DeviceComs("Cannot reach iPhone. Check its IP, Wi-Fi debugging, and network isolation; unlock the iPhone and try again".into())
@@ -251,11 +280,12 @@ pub async fn connect_network_device(
         Ok(DeviceInfoWithPairing {
             info,
             pairing: bytes,
+            remote: None,
         })
     };
     let result = tokio::select! {
         _ = token.cancelled() => Err(AppError::Canceled("Connection".into())),
-        result = tokio::time::timeout(Duration::from_secs(20), query) => result.unwrap_or_else(|_| {
+        result = tokio::time::timeout(Duration::from_secs(40), query) => result.unwrap_or_else(|_| {
             Err(AppError::DeviceComs("Connection timed out. Check the IP and enable Wi-Fi debugging on iPhone before trying again".into()))
         }),
     };

@@ -283,6 +283,33 @@ impl<C: MaxCertsCallback> Sideloader<C> {
         Ok(special_app)
     }
 
+    #[cfg(feature = "install")]
+    /// Sign and install through an authenticated RemotePairing/RSD connection.
+    /// Device information must be read from the authenticated tunnel by the caller.
+    pub async fn install_app_rsd<F, Fut>(
+        &mut self,
+        provider: &mut impl idevice::provider::RsdProvider,
+        handshake: &mut idevice::rsd::RsdHandshake,
+        device: IdeviceInfo,
+        app_path: PathBuf,
+        increased_memory_limit: bool,
+        progress_callback: Option<F>,
+    ) -> Result<Option<SpecialApp>, Report>
+    where F: Fn(f32) -> Fut, Fut: Future<Output = ()> {
+        let team = self.get_team().await?;
+        self.dev_session.ensure_device_registered(&team, &device.name, &device.udid, None).await?;
+        let (signed_path, special) = self.sign_app(app_path, Some(team), increased_memory_limit, progress_callback).await?;
+        let result = crate::sideload::install::install_app_rsd(provider, handshake, &signed_path, |_| {}).await
+            .context("Failed to install app through RemotePairing");
+        if self.delete_app_after_install {
+            if let Err(error) = isideload_vfs::fs::remove_dir_all(&signed_path) {
+                tracing::warn!("Failed to remove temporary signed app file: {}", error);
+            }
+        }
+        result?;
+        Ok(special)
+    }
+
     /// Get the developer team according to the configured team selection behavior
     pub async fn get_team(&mut self) -> Result<DeveloperTeam, Report> {
         if let Some(team) = &self.team {

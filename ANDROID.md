@@ -4,6 +4,17 @@ Community Android port of [iloader](https://github.com/nab138/iloader). This is 
 
 ## Connect and install
 
+For **iOS 27 or newer**, initial pairing can start directly over Wi-Fi. This follows the device-initiated RemotePairing flow documented by [idevice_pair](https://github.com/jkcoxson/idevice_pair#over-wi-fi-with-iphone-or-ipad) and used by [SideStore's wireless pairing interface](https://github.com/SideStore/SideStore/tree/develop/SideStore/Views/Settings/Advanced/PairingFile/WirelessPair).
+
+1. Enable Developer Mode on iPhone, keep it unlocked, and connect both phones to the same Wi-Fi. The network must allow mDNS and communication between clients.
+2. In iDroidLoader, tap **Pair wirelessly**. On iPhone, open **Settings > Privacy & Security > Developer Mode** and select **iDroidLoader** among the pairing hosts.
+3. Enter the six-digit code displayed on Android into iPhone. Keep iDroidLoader open while it establishes the authenticated tunnel. Cancel or retry if pairing expires.
+4. Once the device name appears, install an already-signed IPA, or sign in with Apple ID to sign and install. **Export pairing** saves the RemotePairing record if you want to reconnect after restarting.
+
+This creates a **RemotePairing (RPPairing)** record. It does not create Lockdown certificates. The app uses an authenticated TLS-PSK CDTunnel and a userspace TCP adapter to reach RSD services; it needs no root access or Android VPN permission. Android enables Wi-Fi multicast reception and keeps the screen awake during pairing/discovery, releasing both when the attempt ends. Pairing codes and private protocol messages are excluded from application logs.
+
+For earlier iOS versions, use the existing pairing-file connection:
+
 1. Prepare a trusted **Lockdown** pairing file for your iPhone using a computer. iloader's combined pairing export also works. Enable Wi-Fi debugging before unplugging the iPhone.
 2. Put Android and iPhone on the same Wi-Fi network, with client isolation disabled. Find the iPhone's address in Settings > Wi-Fi > the connected network.
 3. Open iDroidLoader, choose **Import pairing file**, enter the IP address, then tap **Connect to iPhone**. The device name and iOS version appear after an authenticated Lockdown session succeeds.
@@ -15,9 +26,9 @@ On Android, check **Save credentials** when signing in to remember an Apple ID a
 
 Passwords are saved only after a successful login and only when you opt in. Passwords, anisette state, and signing certificates use AES-256-GCM authenticated encryption with a non-exportable Android Keystore key. The private preferences contain ciphertext; app backup is disabled. Passwords are never written to the frontend settings store. If Keystore is unavailable, password saving is disabled and signing data stays in memory. Clearing app data or uninstalling removes saved accounts.
 
-Pairing credentials remain in process memory; reimport the pairing file after restarting. Imported temporary IPA copies are deleted when the operation finishes.
+Pairing credentials remain in process memory; pair again or reimport an exported pairing file after restarting. With a RemotePairing-only file, enter the iPhone's current IP address and keep both phones on the same Wi-Fi so authenticated mDNS discovery can find its current pairing port. RemotePairing records created through a computer can also be imported when the device exposes that service. Imported temporary IPA copies are deleted when the operation finishes.
 
-RemotePairing-only files are detected and rejected with an explanation. The first version uses Lockdown over TCP; a RemotePairing/RSD network connection is not implemented. Cross-network use needs a routed VPN or equivalent connectivity. Imported records are never printed in logs or returned to the frontend.
+Cross-network use needs routed connectivity and, for RemotePairing, service discovery that reaches the device. Imported records are never printed in logs or returned to the frontend. Pairing credentials grant access to your device; keep exported files private.
 
 ## Build on Windows
 
@@ -57,13 +68,15 @@ powershell -ExecutionPolicy Bypass -File scripts/android.ps1 Test
 - Built the ARM64 debug APK, verified its Android signature, and confirmed it packages the ARM64 native library.
 - Installed and cold-started the APK on an Android 16 emulator with ARM64 translation.
 - Used the real Android document picker to import an incomplete plist. The native backend read the content URI and returned the expected missing-certificate error.
-- Passed all 6 Rust unit tests and 4 mobile browser UI tests, including opt-in saved login, reopening, signing out, and deletion. Browser tests use mocked account/device responses; they do not validate Apple authentication or iPhone communication.
+- Passed 21 idevice transport tests and 12 application Rust tests, including a correct and incorrect PIN exchange, rejection of invalid TLS-PSK Finished proofs, authenticated discovery filtering, dual-stack listeners, incomplete pairing records, and cancellation ordering.
+- Passed 7 mobile browser UI tests, covering saved logins, imported pairing, wireless pairing progress, PIN clearing, cancellation, retry, and preserving an existing selection. Browser tests use mocked account/device responses; they do not validate Apple authentication or iPhone communication.
+- Passed an Android wireless smoke test through the packaged interface and native backend: an actual mDNS host announcement, screen-awake acquisition, cancellation, and resource release. It does not simulate a paired iPhone.
 - Passed 5 Android instrumentation checks using isolated public fixtures: encrypted writes/overwrites, deletion, ciphertext tampering/record substitution, missing encryption keys, and retrieval in a new process after a forced stop.
 - Confirmed the running debug APK reports Keystore availability, displays the unchecked **Save credentials** option, and rejects direct frontend access to native stored values.
 - Reproduced 4 Anisette failures with the old verifier under release HTTP restrictions, then passed all 9 Android checks with the updated verifier and production network policy: Apple's lookup, the Android system verifier, expired certificate rejection, v3 POST responses from SideStore `.app` and `.io`, fresh in-memory provisioning followed by real v3 headers from `.app`, and 3 CRL/application HTTP policy checks. These checks use no account credentials. Public service probes cannot guarantee availability on every network.
 - Passed 2 Anisette Rust regression tests: a dropped POST retries with the same payload/device identity and normalized URL, and a final transport error retains its underlying cause while removing URL credentials/tokens. These checks also run in the nightly workflow.
 
-The vendored isideload 0.4.0 has an Android TLS patch and Anisette request/error-handling patches, documented in `src-tauri/vendor/isideload/PATCHES.md`. GrandSlam uses an explicit Mozilla + Apple root store because Android's platform verifier cannot merge extra root certificates. Other HTTP clients use the initialized Android platform verifier; certificate and hostname checks remain enabled.
+The vendored isideload 0.4.0 has Android TLS, Anisette request/error-handling, and RSD installation patches, documented in `src-tauri/vendor/isideload/PATCHES.md`. The MIT-licensed idevice 0.1.68 transport is vendored with strict TLS-PSK Finished validation and tunnel frame bounds checking; see `src-tauri/vendor/idevice/PATCHES.md`. GrandSlam uses an explicit Mozilla + Apple root store because Android's platform verifier cannot merge extra root certificates. Other HTTP clients use the initialized Android platform verifier; certificate and hostname checks remain enabled.
 
 Android release builds use rustls-platform-verifier 0.7.1 and its matching Android component 0.2.0 from the official Maven archive. The component supplies a restricted network security configuration allowing HTTP only for certificate revocation list (CRL) hosts. Previously, the release policy blocked these downloads and Android reported valid Let's Encrypt certificates as `InvalidCertificate(Revoked)`. The [upstream fix](https://github.com/rustls/rustls-platform-verifier/pull/253) preserves certificate and revocation checks. Application HTTP remains blocked in release builds; ordinary debug builds allow local Vite development.
 
@@ -76,6 +89,7 @@ powershell -ExecutionPolicy Bypass -File scripts/android.ps1 Build
 .\gradlew.bat :app:assembleUniversalDebugAndroidTest -x :app:rustBuildUniversalDebug
 # Install the debug app and AndroidTest APK on an isolated emulator first.
 adb shell am instrument -w -e class app.idroidloader.mobile.TlsSmokeTest,app.idroidloader.mobile.NetworkPolicyTest app.idroidloader.mobile.test/androidx.test.runner.AndroidJUnitRunner
+adb shell am instrument -w -e class app.idroidloader.mobile.WirelessPairSmokeTest app.idroidloader.mobile.test/androidx.test.runner.AndroidJUnitRunner
 Remove-Item Env:ORG_GRADLE_PROJECT_idroidReleaseNetworkPolicy
 ```
 
@@ -83,4 +97,4 @@ Remove-Item Env:ORG_GRADLE_PROJECT_idroidReleaseNetworkPolicy
 
 Anisette continues to use `/v3/provisioning_session` and POST `/v3/get_headers` with the stored device identity. The root GET endpoint serves the shared v1 identity and is not used as a fallback. Native header requests have a 30-second timeout per attempt and retry transport failures once; HTTP/API errors are not retried. If a request still fails, its TLS/DNS/connection cause is shown without logging the provisioning payload. See the [SideStore protocol guidance](https://docs.sidestore.io/docs/advanced/anisette).
 
-No physical iPhone or valid pairing credentials were available for interoperability testing. Real-device checks still need to cover successful connection, revoked pairing, unreachable IP, signed IPA installation, Apple ID/2FA signing, and SideStore pairing placement.
+No physical iPhone or valid pairing credentials were available for interoperability testing. Real-device checks still need to cover iOS 27 host discovery and full PIN onboarding, tunnel reconnection, revoked pairing, signed IPA installation, Apple ID/2FA signing, and SideStore pairing placement. Wireless pairing is experimental until those checks have been completed.

@@ -168,11 +168,11 @@ async fn generate_rppairing(
 
 pub async fn place_file(
     pairing: Vec<u8>,
-    provider: &dyn IdeviceProvider,
+    provider: &crate::network::DeviceProvider,
     bundle_id: String,
     path: String,
 ) -> Result<(), AppError> {
-    let house_arrest_client = HouseArrestClient::connect(provider).await.map_err(|e| {
+    let house_arrest_client = provider.service::<HouseArrestClient>().await.map_err(|e| {
         AppError::HouseArrest("Failed to connect to house arrest".into(), e.to_string())
     })?;
 
@@ -463,15 +463,15 @@ pub async fn installed_pairing_apps(
         }
     };
     let provider = get_provider(&device).await?;
-    let mut installation_proxy =
-        InstallationProxyClient::connect(&provider)
-            .await
-            .map_err(|e| {
-                AppError::DeviceComsWithMessage(
-                    "Failed to connect to installation proxy".into(),
-                    e.to_string(),
-                )
-            })?;
+    let mut installation_proxy = provider
+        .service::<InstallationProxyClient>()
+        .await
+        .map_err(|e| {
+            AppError::DeviceComsWithMessage(
+                "Failed to connect to installation proxy".into(),
+                e.to_string(),
+            )
+        })?;
 
     let installed_apps = installation_proxy
         .get_apps(Some("User"), None)
@@ -514,15 +514,15 @@ pub async fn get_sidestore_info(
     live_container: bool,
 ) -> Result<Option<PairingAppInfo>, AppError> {
     let provider = get_provider(device).await?;
-    let mut installation_proxy =
-        InstallationProxyClient::connect(&provider)
-            .await
-            .map_err(|e| {
-                AppError::DeviceComsWithMessage(
-                    "Failed to connect to installation proxy".into(),
-                    e.to_string(),
-                )
-            })?;
+    let mut installation_proxy = provider
+        .service::<InstallationProxyClient>()
+        .await
+        .map_err(|e| {
+            AppError::DeviceComsWithMessage(
+                "Failed to connect to installation proxy".into(),
+                e.to_string(),
+            )
+        })?;
 
     let installed_apps = installation_proxy
         .get_apps(Some("User"), None)

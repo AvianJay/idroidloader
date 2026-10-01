@@ -7,6 +7,7 @@ import type { DeviceInfo, DeviceProps } from "./Device";
 import { useError } from "./ErrorContext";
 import { usePlatform } from "./PlatformContext";
 import type { AppError } from "./errors";
+import { WirelessPair } from "./WirelessPair";
 
 function appError(error: unknown): AppError {
   if (typeof error === "object" && error !== null && "type" in error && "message" in error) return error as AppError;
@@ -20,11 +21,12 @@ export function NetworkDevice({ selectedDevice, setSelectedDevice, registerRefre
   const [address, setAddress] = useState(selectedDevice?.address ?? "");
   const [pairingPath, setPairingPath] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [wirelessBusy, setWirelessBusy] = useState(false);
   const request = useRef(0);
   const active = selectedDevice?.address ? selectedDevice : null;
 
   const connect = useCallback(async () => {
-    if (busy || !pairingPath || !address.trim()) return;
+    if (busy || wirelessBusy || !pairingPath || !address.trim()) return;
     const id = ++request.current;
     setBusy(true);
     try {
@@ -37,7 +39,7 @@ export function NetworkDevice({ selectedDevice, setSelectedDevice, registerRefre
     } finally {
       if (id === request.current) setBusy(false);
     }
-  }, [address, pairingPath, busy, setSelectedDevice, t, err]);
+  }, [address, pairingPath, busy, wirelessBusy, setSelectedDevice, t, err]);
 
   useEffect(() => {
     registerRefresh?.(connect);
@@ -55,8 +57,8 @@ export function NetworkDevice({ selectedDevice, setSelectedDevice, registerRefre
     <form className="network-form" onSubmit={(event) => { event.preventDefault(); void connect(); }}>
       <label htmlFor="device-ip">{t("network.address")}</label>
       <input id="device-ip" type="text" inputMode="text" autoCapitalize="none" autoCorrect="off" spellCheck={false}
-        placeholder="192.168.1.100" value={address} onChange={(event) => setAddress(event.target.value)} disabled={busy} />
-      <button type="button" disabled={busy} onClick={async () => {
+        placeholder="192.168.1.100" value={address} onChange={(event) => setAddress(event.target.value)} disabled={busy || wirelessBusy} />
+      <button type="button" disabled={busy || wirelessBusy} onClick={async () => {
         try {
           const path = await open({ multiple: false, ...(platform === "android" ? {} : {
             filters: [{ name: "Pairing file", extensions: ["plist", "mobiledevicepairing"] }]
@@ -65,7 +67,7 @@ export function NetworkDevice({ selectedDevice, setSelectedDevice, registerRefre
         } catch (error) { toast.error(err(t("network.import_failed"), appError(error))); }
       }}>{pairingPath ? t("network.replace_pairing") : t("network.import_pairing")}</button>
       {pairingPath && <span className="pairing-file-ready" role="status">{t("network.pairing_ready")}</span>}
-      <button type="submit" disabled={busy || !pairingPath || !address.trim()}>
+      <button type="submit" disabled={busy || wirelessBusy || !pairingPath || !address.trim()}>
         {busy ? t("network.connecting") : t("network.connect")}
       </button>
       {busy && <button type="button" onClick={async () => {
@@ -74,12 +76,13 @@ export function NetworkDevice({ selectedDevice, setSelectedDevice, registerRefre
         setBusy(false);
       }}>{t("common.cancel")}</button>}
     </form>
+    <WirelessPair disabled={busy} setSelectedDevice={setSelectedDevice} onBusyChange={setWirelessBusy} />
     {active && <div className="device-card active">
       <div className="device-meta">
         <span className="device-name">{active.name}</span>
         <span className="device-connection">iOS {active.version} · {active.address}</span>
       </div>
-      <button type="button" disabled={busy} onClick={async () => {
+      <button type="button" disabled={busy || wirelessBusy} onClick={async () => {
         await invoke("set_selected_device", { device: null });
         setSelectedDevice(null);
       }}>{t("network.disconnect")}</button>

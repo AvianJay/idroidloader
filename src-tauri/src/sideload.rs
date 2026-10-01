@@ -62,15 +62,25 @@ pub async fn sideload(
 
     let mut sideloader = SideloaderGuard::take(&sideloader_state)?;
 
-    let special = sideloader
-        .get_mut()
-        .install_app(
-            &provider,
-            app_path.into(),
-            false,
-            None::<fn(f32) -> std::future::Ready<()>>,
-        )
-        .await?;
+    let special = if let crate::network::DeviceProvider::Remote(remote) = &provider {
+        remote
+            .sign_and_install(
+                sideloader.get_mut(),
+                app_path.into(),
+                isideload::util::device::IdeviceInfo::new(device.info.name, device.info.udid),
+            )
+            .await?
+    } else {
+        sideloader
+            .get_mut()
+            .install_app(
+                &provider,
+                app_path.into(),
+                false,
+                None::<fn(f32) -> std::future::Ready<()>>,
+            )
+            .await?
+    };
 
     Ok(special)
 }
@@ -129,12 +139,9 @@ pub async fn install_signed_operation(
         })
         .await
         .map_err(|_| AppError::Filesystem("IPA import failed".into(), String::new()))??;
-        isideload::sideload::install::install_app(
-            &provider,
-            &application.bundle.bundle_dir,
-            |_| {},
-        )
-        .await?;
+        provider
+            .install_signed(&application.bundle.bundle_dir)
+            .await?;
         drop(prepared);
         Ok::<_, AppError>(())
     }

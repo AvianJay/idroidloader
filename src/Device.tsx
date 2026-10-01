@@ -13,7 +13,7 @@ export type DeviceInfo = {
   name: string;
   id: number;
   udid: string;
-  connectionType: "USB" | "Network" | "Unknown";
+  connectionType: "USB" | "Network" | "Wireless" | "Unknown";
   version: string;
   address?: string | null;
 };

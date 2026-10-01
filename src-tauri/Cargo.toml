@@ -5,6 +5,10 @@ description = "User-friendly sideloader"
 authors = ["nab138"]
 edition = "2024"
 
+[workspace]
+members = ["vendor/idevice"]
+default-members = ["."]
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
@@ -22,7 +26,9 @@ tauri = { version = "2", features = ["devtools"] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-idevice = { version = "0.1.57", default-features = false, features = ["ring", "usbmuxd", "house_arrest", "afc", "core_device_proxy", "remote_pairing", "tcp", "tunnel_tcp_stack", "xpc", "rsd", "pair"] }
+idevice = { version = "0.1.68", default-features = false, features = ["ring", "usbmuxd", "house_arrest", "afc", "core_device_proxy", "remote_pairing", "tcp", "tunnel_tcp_stack", "xpc", "rsd", "pair"] }
+mdns-sd = "0.20"
+socket2 = "0.6"
 isideload = { version = "0.4.0", features = ["fs-storage"] } #, git = "https://github.com/nab138/isideload", package = "isideload", branch = "apple-codesign-quick" }
 keyring = { version = "3.6.3", features = ["apple-native", "windows-native", "linux-native-sync-persistent"] }
 tauri-plugin-store = "2"
@@ -57,3 +63,4 @@ rustls-platform-verifier = "=0.7.1"
 [patch.crates-io]
 # Android GrandSlam needs an explicit root store; platform-verifier cannot merge roots there.
 isideload = { path = "vendor/isideload" }
+idevice = { path = "vendor/idevice" }

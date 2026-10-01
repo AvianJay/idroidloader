@@ -4,9 +4,14 @@
 import { mockIPC, mockWindows } from '/node_modules/@tauri-apps/api/mocks.js';
 window.testCalls = [];
 const credentialsTest = new URLSearchParams(location.search).has('credentials');
-if (credentialsTest) localStorage.setItem('i18nextLng', 'en');
+const wirelessTest = new URLSearchParams(location.search).has('wireless');
+if (credentialsTest || wirelessTest) localStorage.setItem('i18nextLng', 'en');
 const values = credentialsTest ? JSON.parse(localStorage.getItem('fixture-settings') || '{}') : {};
 let loggedIn = null;
+let wirelessRequest = null;
+window.wirelessStatus = message => wirelessRequest?.channel.onmessage(message);
+window.completeWireless = () => wirelessRequest?.resolve({ name: 'Wireless iPhone', id: 0, udid: 'fixture-wireless-udid', version: '27.0', connectionType: 'Wireless', address: '192.168.1.27' });
+window.failWireless = () => wirelessRequest?.reject({ type: 'remote_pairing', message: 'Wireless pairing timed out' });
 mockIPC((command, args) => {
   window.testCalls.push({ command, args });
   if (command === 'plugin:store|load') return 1;
@@ -34,6 +39,11 @@ mockIPC((command, args) => {
     if (args.address === '192.168.1.99') throw { type: 'device_coms', message: 'Connection timed out' };
     return { name: 'Test iPhone', id: 0, udid: 'test-udid', version: '18.0', connectionType: 'Network', address: args.address };
   }
+  if (command === 'pair_wireless_device') {
+    return new Promise((resolve, reject) => { wirelessRequest = { requestId: args.requestId, channel: args.onStatus, resolve, reject }; });
+  }
+  if (command === 'cancel_pairing') wirelessRequest?.reject({ type: 'canceled', message: 'Wireless pairing canceled' });
+  if (command === 'cancel_wireless_pairing' && wirelessRequest?.requestId === args.requestId) wirelessRequest.reject({ type: 'canceled', message: 'Wireless pairing canceled' });
   return null;
 }, { shouldMockEvents: true });
 mockWindows('main');
