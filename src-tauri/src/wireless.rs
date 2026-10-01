@@ -82,7 +82,13 @@ impl WirelessAttempts {
 }
 
 #[tauri::command]
-pub fn cancel_wireless_pairing(request_id: String, attempts: State<'_, WirelessAttempts>) {
+pub fn cancel_wireless_pairing(
+    request_id: String,
+    attempts: State<'_, WirelessAttempts>,
+    cancel_state: State<'_, PairingCancelToken>,
+) {
+    // Serialize cancellation with committing the selected device below.
+    let _commit_guard = cancel_state.lock().unwrap();
     attempts.cancel(&request_id);
 }
 
@@ -481,8 +487,8 @@ pub async fn pair_wireless_device(
         _ = token.cancelled() => Err(AppError::Canceled("Wireless pairing".into())),
         result = tokio::time::timeout(Duration::from_secs(180), query) => result.unwrap_or_else(|_| Err(failure("Wireless pairing timed out. Open Developer Mode on iOS 27 or newer and try again"))),
     };
-    attempts.finish(&request_id);
     let mut guard = cancel_state.lock().unwrap();
+    attempts.finish(&request_id);
     if token.is_cancelled() {
         return Err(AppError::Canceled("Wireless pairing".into()));
     }
