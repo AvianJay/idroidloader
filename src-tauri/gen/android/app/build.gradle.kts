@@ -1,4 +1,5 @@
 import java.util.Properties
+import groovy.json.JsonSlurper
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -16,6 +17,23 @@ val tauriProperties = Properties().apply {
 
 val signingKeystore = System.getenv("KEYSTORE_FILE")
 val nightlyBuild = System.getenv("IDROID_NIGHTLY_BUILD")?.toInt()
+
+// Resolve the JVM verifier bundled with the exact Cargo dependency version.
+val cargoMetadata = providers.exec {
+    workingDir(rootProject.projectDir)
+    commandLine("cargo", "metadata", "--locked", "--format-version", "1", "--filter-platform", "aarch64-linux-android", "--manifest-path", "../../Cargo.toml")
+}.standardOutput.asText
+val verifierManifest = (JsonSlurper().parseText(cargoMetadata.get()) as Map<*, *>)["packages"]
+    .let { it as List<*> }
+    .map { it as Map<*, *> }
+    .first { it["name"] == "rustls-platform-verifier-android" }["manifest_path"] as String
+repositories {
+    maven {
+        url = uri(file(verifierManifest).parentFile.resolve("maven"))
+        metadataSources { mavenPom(); artifact() }
+        content { includeModule("rustls", "rustls-platform-verifier") }
+    }
+}
 
 android {
     System.getenv("NDK_HOME")?.let { ndkVersion = file(it).name }
@@ -87,6 +105,7 @@ rust {
 }
 
 dependencies {
+    implementation("rustls:rustls-platform-verifier:0.1.1")
     implementation("androidx.webkit:webkit:1.14.0")
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.activity:activity-ktx:1.10.1")

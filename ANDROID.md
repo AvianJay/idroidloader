@@ -60,5 +60,8 @@ powershell -ExecutionPolicy Bypass -File scripts/android.ps1 Test
 - Passed all 6 Rust unit tests and 4 mobile browser UI tests, including opt-in saved login, reopening, signing out, and deletion. Browser tests use mocked account/device responses; they do not validate Apple authentication or iPhone communication.
 - Passed 5 Android instrumentation checks using isolated public fixtures: encrypted writes/overwrites, deletion, ciphertext tampering/record substitution, missing encryption keys, and retrieval in a new process after a forced stop.
 - Confirmed the running debug APK reports Keystore availability, displays the unchecked **Save credentials** option, and rejects direct frontend access to native stored values.
+- Passed 3 Android HTTPS checks without account credentials: the GrandSlam client builds and connects to Apple's lookup endpoint, the initialized Android system verifier connects to Anisette, and the GrandSlam client rejects an expired certificate.
+
+The vendored isideload 0.4.0 has one Android-only TLS change, documented in `src-tauri/vendor/isideload/PATCHES.md`. GrandSlam uses an explicit Mozilla + Apple root store because Android's platform verifier cannot merge extra root certificates. Other HTTP clients use the initialized Android platform verifier; certificate and hostname checks remain enabled.
 
 No physical iPhone or valid pairing credentials were available for interoperability testing. Real-device checks still need to cover successful connection, revoked pairing, unreachable IP, signed IPA installation, Apple ID/2FA signing, and SideStore pairing placement.

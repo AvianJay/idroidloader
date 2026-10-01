@@ -2578,6 +2578,7 @@ dependencies = [
  "idevice",
  "isideload",
  "isideload-vfs",
+ "jni 0.22.4",
  "keyring",
  "once_cell",
  "plist",
@@ -2585,6 +2586,7 @@ dependencies = [
  "reqwest",
  "rootcause",
  "rustls",
+ "rustls-platform-verifier",
  "serde",
  "serde_json",
  "strum",
@@ -2685,8 +2687,6 @@ dependencies = [
 [[package]]
 name = "isideload"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec15f715854513ea29c71ac061dcfd6e053ccda71dc5e39e5145d22d32299343"
 dependencies = [
  "aes 0.9.3",
  "aes-gcm",
@@ -2726,6 +2726,7 @@ dependencies = [
  "urlencoding",
  "uuid",
  "web-time",
+ "webpki-root-certs",
  "x509-cert 0.2.5",
  "zip 8.6.0",
 ]

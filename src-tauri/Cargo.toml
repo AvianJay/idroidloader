@@ -49,3 +49,11 @@ strum = {version = "0.28.0", features = ["derive"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2"
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.22.4"
+rustls-platform-verifier = "=0.7.0"
+
+[patch.crates-io]
+# Android GrandSlam needs an explicit root store; platform-verifier cannot merge roots there.
+isideload = { path = "vendor/isideload" }

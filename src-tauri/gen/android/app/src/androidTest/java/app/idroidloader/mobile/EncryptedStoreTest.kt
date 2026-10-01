@@ -49,8 +49,13 @@ class EncryptedStoreTest {
         val records = preferences.all.entries.toList()
         preferences.edit().putString(records[1].key, records[0].value as String).commit()
         assertTrue(runCatching { store().retrieve("account:one"); store().retrieve("signing:two") }.isFailure)
-        preferences.edit().putString(records[0].key, "invalid-public-fixture").commit()
-        assertTrue(runCatching { store().retrieve("account:one"); store().retrieve("signing:two") }.isFailure)
+        preferences.edit().clear().commit()
+        store().store("account:tamper", "public-tamper-fixture")
+        val record = preferences.all.keys.single()
+        val bytes = android.util.Base64.decode(preferences.getString(record, null), android.util.Base64.NO_WRAP)
+        bytes[bytes.lastIndex] = (bytes.last().toInt() xor 1).toByte()
+        preferences.edit().putString(record, android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)).commit()
+        assertTrue(runCatching { store().retrieve("account:tamper") }.isFailure)
     }
 
     @Test

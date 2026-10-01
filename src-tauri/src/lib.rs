@@ -2,6 +2,8 @@
 mod account;
 #[cfg(target_os = "android")]
 mod android_storage;
+#[cfg(target_os = "android")]
+mod android_tls;
 #[macro_use]
 mod device;
 #[macro_use]
