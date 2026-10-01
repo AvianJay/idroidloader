@@ -60,10 +60,26 @@ powershell -ExecutionPolicy Bypass -File scripts/android.ps1 Test
 - Passed all 6 Rust unit tests and 4 mobile browser UI tests, including opt-in saved login, reopening, signing out, and deletion. Browser tests use mocked account/device responses; they do not validate Apple authentication or iPhone communication.
 - Passed 5 Android instrumentation checks using isolated public fixtures: encrypted writes/overwrites, deletion, ciphertext tampering/record substitution, missing encryption keys, and retrieval in a new process after a forced stop.
 - Confirmed the running debug APK reports Keystore availability, displays the unchecked **Save credentials** option, and rejects direct frontend access to native stored values.
-- Passed 6 Android HTTPS/Anisette checks without account credentials: Apple's lookup, the Android system verifier, expired certificate rejection, v3 POST responses from SideStore `.app` and `.io`, and fresh in-memory provisioning followed by real v3 headers from `.app`. One initial provisioning attempt failed and subsequent runs passed; a public service probe cannot guarantee availability on every network.
+- Reproduced 4 Anisette failures with the old verifier under release HTTP restrictions, then passed all 9 Android checks with the updated verifier and production network policy: Apple's lookup, the Android system verifier, expired certificate rejection, v3 POST responses from SideStore `.app` and `.io`, fresh in-memory provisioning followed by real v3 headers from `.app`, and 3 CRL/application HTTP policy checks. These checks use no account credentials. Public service probes cannot guarantee availability on every network.
 - Passed 2 Anisette Rust regression tests: a dropped POST retries with the same payload/device identity and normalized URL, and a final transport error retains its underlying cause while removing URL credentials/tokens. These checks also run in the nightly workflow.
 
 The vendored isideload 0.4.0 has an Android TLS patch and Anisette request/error-handling patches, documented in `src-tauri/vendor/isideload/PATCHES.md`. GrandSlam uses an explicit Mozilla + Apple root store because Android's platform verifier cannot merge extra root certificates. Other HTTP clients use the initialized Android platform verifier; certificate and hostname checks remain enabled.
+
+Android release builds use rustls-platform-verifier 0.7.1 and its matching Android component 0.2.0 from the official Maven archive. The component supplies a restricted network security configuration allowing HTTP only for certificate revocation list (CRL) hosts. Previously, the release policy blocked these downloads and Android reported valid Let's Encrypt certificates as `InvalidCertificate(Revoked)`. The [upstream fix](https://github.com/rustls/rustls-platform-verifier/pull/253) preserves certificate and revocation checks. Application HTTP remains blocked in release builds; ordinary debug builds allow local Vite development.
+
+To exercise release networking with debug-only JNI probes, build with the production network policy and run the Android instrumentation tests:
+
+```powershell
+$env:ORG_GRADLE_PROJECT_idroidReleaseNetworkPolicy = 'true'
+powershell -ExecutionPolicy Bypass -File scripts/android.ps1 Build
+# From src-tauri/gen/android, with the same Cargo/JDK/SDK environment:
+.\gradlew.bat :app:assembleUniversalDebugAndroidTest -x :app:rustBuildUniversalDebug
+# Install the debug app and AndroidTest APK on an isolated emulator first.
+adb shell am instrument -w -e class app.idroidloader.mobile.TlsSmokeTest,app.idroidloader.mobile.NetworkPolicyTest app.idroidloader.mobile.test/androidx.test.runner.AndroidJUnitRunner
+Remove-Item Env:ORG_GRADLE_PROJECT_idroidReleaseNetworkPolicy
+```
+
+`NetworkPolicyTest` verifies CRL HTTP is allowed while application HTTP and lookalike CRL domains remain blocked. These probes do not use Apple ID credentials or save provisioning data.
 
 Anisette continues to use `/v3/provisioning_session` and POST `/v3/get_headers` with the stored device identity. The root GET endpoint serves the shared v1 identity and is not used as a fallback. Native header requests have a 30-second timeout per attempt and retry transport failures once; HTTP/API errors are not retried. If a request still fails, its TLS/DNS/connection cause is shown without logging the provisioning payload. See the [SideStore protocol guidance](https://docs.sidestore.io/docs/advanced/anisette).
 

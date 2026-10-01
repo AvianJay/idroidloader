@@ -18,20 +18,22 @@ val tauriProperties = Properties().apply {
 val signingKeystore = System.getenv("KEYSTORE_FILE")
 val nightlyBuild = System.getenv("IDROID_NIGHTLY_BUILD")?.toInt()
 
-// Resolve the JVM verifier bundled with the exact Cargo dependency version.
+// Resolve the JVM verifier from the official Maven archive, synchronized with Cargo.
 val cargoMetadata = providers.exec {
     workingDir(rootProject.projectDir)
     commandLine("cargo", "metadata", "--locked", "--format-version", "1", "--filter-platform", "aarch64-linux-android", "--manifest-path", "../../Cargo.toml")
 }.standardOutput.asText
-val verifierManifest = (JsonSlurper().parseText(cargoMetadata.get()) as Map<*, *>)["packages"]
+val verifierAndroidVersion = (JsonSlurper().parseText(cargoMetadata.get()) as Map<*, *>)["packages"]
     .let { it as List<*> }
     .map { it as Map<*, *> }
-    .first { it["name"] == "rustls-platform-verifier-android" }["manifest_path"] as String
+    .first { it["name"] == "rustls-platform-verifier-android" }["version"] as String
+val releaseNetworkPolicy = providers.gradleProperty("idroidReleaseNetworkPolicy")
+    .map { it.toBoolean() }.getOrElse(false)
 repositories {
     maven {
-        url = uri(file(verifierManifest).parentFile.resolve("maven"))
+        url = uri("https://github.com/rustls/rustls-platform-verifier/raw/maven-archive/android-release-support/maven/")
         metadataSources { mavenPom(); artifact() }
-        content { includeModule("rustls", "rustls-platform-verifier") }
+        content { includeModule("org.rustls", "rustls-platform-verifier") }
     }
 }
 
@@ -41,6 +43,7 @@ android {
     namespace = "app.idroidloader.mobile"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
+        manifestPlaceholders["networkSecurityConfig"] = "@xml/network_security_config"
         applicationId = "app.idroidloader.mobile"
         minSdk = 26
         targetSdk = 36
@@ -65,7 +68,9 @@ android {
     }
     buildTypes {
         getByName("debug") {
-            manifestPlaceholders["usesCleartextTraffic"] = "true"
+            manifestPlaceholders["usesCleartextTraffic"] = (!releaseNetworkPolicy).toString()
+            manifestPlaceholders["networkSecurityConfig"] = if (releaseNetworkPolicy)
+                "@xml/network_security_config" else "@xml/network_security_config_debug"
             isDebuggable = true
             isJniDebuggable = true
             isMinifyEnabled = false
@@ -105,7 +110,7 @@ rust {
 }
 
 dependencies {
-    implementation("rustls:rustls-platform-verifier:0.1.1")
+    implementation("org.rustls:rustls-platform-verifier:$verifierAndroidVersion")
     implementation("androidx.webkit:webkit:1.14.0")
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.activity:activity-ktx:1.10.1")
