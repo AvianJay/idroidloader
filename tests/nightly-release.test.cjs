@@ -1,13 +1,14 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const publish = require('../.github/scripts/publish-nightly.cjs');
+const publish = require('../.github/scripts/publish-android.cjs');
 
 const context = {
   repo: { owner: 'AvianJay', repo: 'idroidloader' },
   sha: 'first-commit', runId: 101, runNumber: 1, runAttempt: 1,
 };
 
-function fixture({ existing = false, draft = false, failUpload = 0, denied = false, stale = false } = {}) {
+function fixture({ existing = false, draft = false, failUpload = 0, denied = false, stale = false, channel = 'nightly' } = {}) {
+  const releaseTag = channel === 'nightly' ? 'nightly' : 'v2.3.4';
   const state = {
     head: stale ? 'newer-commit' : context.sha,
     release: existing ? { id: 17, tag_name: 'nightly', draft } : null,
@@ -21,7 +22,7 @@ function fixture({ existing = false, draft = false, failUpload = 0, denied = fal
   const notFound = () => Object.assign(new Error('Not found'), { status: 404 });
   const repos = {
     getReleaseByTag: async ({ tag }) => {
-      assert.equal(tag, 'nightly');
+      assert.equal(tag, releaseTag);
       if (denied) throw Object.assign(new Error('Forbidden'), { status: 403 });
       if (!state.release || state.release.draft) throw notFound();
       return { data: state.release };
@@ -77,9 +78,11 @@ function fixture({ existing = false, draft = false, failUpload = 0, denied = fal
     paginate: async (method, args) => (await method(args)).data,
   };
   return {
-    state, github, context: { ...context },
+    state, github, channel, context: { ...context, ref: `refs/tags/${releaseTag}` },
     core: { notice: text => state.notices.push(text) },
-    readFile: () => Buffer.from('public artifact fixture'),
+    readFile: file => Buffer.from(file.endsWith('.json')
+      ? JSON.stringify({ channel, version: channel === 'nightly' ? '2.3.4-nightly.1' : '2.3.4' })
+      : 'public artifact fixture'),
   };
 }
 
@@ -95,7 +98,7 @@ test('creates one nightly release and reuses its ID on the next build', async ()
   assert.equal(setup.state.release.prerelease, true);
   assert.equal(setup.state.tag, 'second-commit');
   assert.deepEqual(setup.state.assets.map(asset => asset.name).sort(), [
-    'iDroidLoader-arm64.apk', 'iDroidLoader-arm64.apk.sha256',
+    'android-update.json', 'iDroidLoader-arm64.apk', 'iDroidLoader-arm64.apk.sha256',
   ]);
   assert.deepEqual(setup.state.refs.map(ref => ref.ref), ['refs/tags/nightly', 'tags/nightly']);
 });
@@ -130,4 +133,29 @@ test('does not overwrite nightly with an obsolete commit', async () => {
   assert.equal(setup.state.creates, 0);
   assert.equal(setup.state.uploads, 0);
   assert.equal(setup.state.notices.length, 1);
+});
+
+test('publishes stable APKs and updater metadata without moving the release tag', async () => {
+  const setup = fixture({ channel: 'release' });
+  await publish(setup);
+  assert.equal(setup.state.release.tag_name, 'v2.3.4');
+  assert.equal(setup.state.release.prerelease, false);
+  assert.equal(setup.state.release.make_latest, 'legacy');
+  assert.equal(setup.state.refs.length, 0);
+  assert.ok(setup.state.assets.some(asset => asset.name === 'android-update.json'));
+});
+
+test('rejects stable tags that do not match the packaged version before publishing', async () => {
+  const setup = fixture({ channel: 'release' });
+  setup.context.ref = 'refs/tags/v2.4.0';
+  await assert.rejects(publish(setup), /metadata does not match/);
+  assert.equal(setup.state.creates, 0);
+  assert.equal(setup.state.uploads, 0);
+});
+
+test('failure uploading metadata preserves the previously published APKs', async () => {
+  const setup = fixture({ existing: true, failUpload: 3 });
+  await assert.rejects(publish(setup), /Upload failed/);
+  assert.deepEqual(setup.state.assets.map(asset => asset.id), [1, 2, 3]);
+  assert.equal(setup.state.updates.length, 0);
 });

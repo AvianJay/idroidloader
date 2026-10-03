@@ -13,6 +13,7 @@ import { Trans, useTranslation } from "react-i18next";
 import i18n, { sortedLanguages } from "../i18next";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { DeviceInfo } from "../Device";
+import { AndroidUpdater } from "../components/AndroidUpdater";
 
 type SettingsProps = {
   ensureSelectedDevice: () => boolean;
@@ -107,6 +108,7 @@ export const Settings = ({
   return (
     <>
       <div className="settings-container">
+        {platform === "android" && <AndroidUpdater />}
         <Dropdown
           label={t("settings.anisette_server")}
           labelId="anisette-label"

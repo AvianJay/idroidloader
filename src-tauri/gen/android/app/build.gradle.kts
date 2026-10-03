@@ -16,7 +16,10 @@ val tauriProperties = Properties().apply {
 }
 
 val signingKeystore = System.getenv("KEYSTORE_FILE")
-val nightlyBuild = System.getenv("IDROID_NIGHTLY_BUILD")?.toInt()
+val androidBuild = (System.getenv("IDROID_ANDROID_BUILD") ?: System.getenv("IDROID_NIGHTLY_BUILD"))?.toInt()
+val updateChannel = System.getenv("IDROID_UPDATE_CHANNEL")
+    ?: if (System.getenv("IDROID_NIGHTLY_BUILD") != null) "nightly" else "release"
+require(updateChannel == "release" || updateChannel == "nightly") { "Invalid update channel" }
 
 // Resolve the JVM verifier from the official Maven archive, synchronized with Cargo.
 val cargoMetadata = providers.exec {
@@ -48,10 +51,11 @@ android {
         minSdk = 26
         targetSdk = 36
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = nightlyBuild?.let { 100_000_000 + it }
+        buildConfigField("String", "UPDATE_CHANNEL", "\"$updateChannel\"")
+        versionCode = androidBuild?.let { 100_000_000 + it }
             ?: tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0") +
-            (nightlyBuild?.let { "-nightly.$it" } ?: "")
+            (if (updateChannel == "nightly") "-nightly.${requireNotNull(androidBuild)}" else "")
     }
     signingConfigs {
         if (!signingKeystore.isNullOrBlank()) {

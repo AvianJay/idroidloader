@@ -6,6 +6,10 @@ mod android_storage;
 mod android_tls;
 #[cfg(target_os = "android")]
 mod android_wireless;
+#[cfg(target_os = "android")]
+mod android_updater;
+#[cfg(target_os = "android")]
+use android_updater::{android_update_info, check_android_update, install_android_update};
 #[macro_use]
 mod device;
 #[macro_use]
@@ -55,6 +59,8 @@ pub fn run() {
     let builder = builder.plugin(android_storage::init());
     #[cfg(target_os = "android")]
     let builder = builder.plugin(android_wireless::init());
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(android_updater::init());
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     builder
@@ -136,6 +142,12 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            #[cfg(target_os = "android")]
+            android_update_info,
+            #[cfg(target_os = "android")]
+            check_android_update,
+            #[cfg(target_os = "android")]
+            install_android_update,
             login_new,
             invalidate_account,
             logged_in_as,

@@ -43,9 +43,21 @@ powershell -ExecutionPolicy Bypass -File scripts/android.ps1 Build
 
 The installable debug APK is copied to `artifacts/iDroidLoader-arm64-debug.apk`. It targets 64-bit ARM devices on Android 8.0 or newer. Debug signing is for development; production distribution needs a release signing configuration.
 
+## Updates: Release and Nightly
+
+In **Settings > App updates**, choose **Release** for stable versions or **Nightly** for development builds. The selection is saved and checked when the app starts; **Check for updates** checks it again. New installations default to the channel they were built from.
+
+Tap **Download and install** to update. If Android asks, allow iDroidLoader to install apps, return to the app, and tap the button again. The APK is downloaded into private cache, checked against its SHA-256 checksum, package name, version, and installed signing certificate, then handed to Android's installer for confirmation. Existing app data is retained. A debug APK cannot update to a release APK signed with a different key.
+
+Both channels share an increasing Android version code. Switching channels only offers a newer build; switching from Nightly to Release may require waiting for the next stable release. If a channel has no Android release with updater metadata yet, the app says so.
+
+## Signed release builds
+
+The **Android Builds** workflow publishes a stable release when a `vX.Y.Z` tag is pushed. Bump the app version to match the tag before tagging. The packaged version must match the tag or publication fails. Stable builds use the same signing secrets as Nightly and publish an APK, checksum, and `android-update.json` to that tagged GitHub release.
+
 ## Signed nightly builds
 
-Download the signed APK from the single [Nightly release](https://github.com/AvianJay/idroidloader/releases/tag/nightly). The Android Nightly workflow runs on main pushes, daily at 18:00 UTC (02:00 Taiwan time), or manually from Actions. Each successful build replaces the APK and SHA-256 checksum on that same release, moves the `nightly` tag to the built commit, and increases Android's version code so future nightly APKs can update in place.
+Download the signed APK from the single [Nightly release](https://github.com/AvianJay/idroidloader/releases/tag/nightly). The Android Builds workflow runs on main pushes, daily at 18:00 UTC (02:00 Taiwan time), or manually from Actions. Each successful nightly build replaces the APK, SHA-256 checksum, and updater metadata on that same release and moves the `nightly` tag to the built commit. Both channels use `100000000 + github.run_number` from this workflow for Android's version code, preserving the previous nightly sequence. Keep this workflow's run-number sequence when maintaining the release pipeline.
 
 The repository needs these GitHub Actions secrets:
 

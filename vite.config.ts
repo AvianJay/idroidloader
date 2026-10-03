@@ -7,6 +7,8 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [react()],
+  // Avoid crawling Rust toolchain docs and generated Android reports on cold starts.
+  optimizeDeps: { entries: ["index.html", "tests/harness.html"] },
 
   build: {
     target: "es2018",
@@ -30,7 +32,7 @@ export default defineConfig(async () => ({
       : undefined,
     watch: {
       // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      ignored: ["**/src-tauri/**", "**/.tools/**", "**/artifacts/**", "**/test-results/**"],
     },
   },
 }));

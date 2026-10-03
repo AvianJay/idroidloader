@@ -1,19 +1,29 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-module.exports = async function publish({ github, context, core, readFile = fs.readFileSync }) {
+module.exports = async function publish({ github, context, core, readFile = fs.readFileSync, channel = process.env.IDROID_UPDATE_CHANNEL || 'nightly' }) {
   const repo = context.repo;
-  const tag = 'nightly';
-  const files = ['iDroidLoader-arm64.apk', 'iDroidLoader-arm64.apk.sha256'];
-  const main = await github.rest.git.getRef({ ...repo, ref: 'heads/main' });
-  if (main.data.object.sha !== context.sha) {
-    core.notice('A newer main commit exists; its build will update nightly.');
-    return;
+  if (!['release', 'nightly'].includes(channel)) throw new Error('Invalid update channel');
+  const nightly = channel === 'nightly';
+  const tag = nightly ? 'nightly' : context.ref.replace(/^refs\/tags\//, '');
+  if (!nightly && !/^v\d+\.\d+\.\d+$/.test(tag)) throw new Error('Stable releases require a vX.Y.Z tag');
+  const files = ['iDroidLoader-arm64.apk', 'iDroidLoader-arm64.apk.sha256', 'android-update.json'];
+  if (nightly) {
+    const main = await github.rest.git.getRef({ ...repo, ref: 'heads/main' });
+    if (main.data.object.sha !== context.sha) {
+      core.notice('A newer main commit exists; its build will update nightly.');
+      return;
+    }
   }
 
-  const build = process.env.IDROID_NIGHTLY_BUILD ?? String(context.runNumber);
+  const manifest = JSON.parse(readFile(path.join('artifacts', 'android-update.json')).toString());
+  if (manifest.channel !== channel || (!nightly && manifest.version !== tag.slice(1))) {
+    throw new Error('APK metadata does not match the release channel/tag');
+  }
+  const build = process.env.IDROID_ANDROID_BUILD ?? String(context.runNumber);
+  const name = nightly ? 'iDroidLoader Nightly' : `iDroidLoader ${tag}`;
   const body = [
-    'Rolling Android nightly: this release is updated in place after successful builds.',
+    nightly ? 'Rolling Android nightly: this release is updated in place after successful builds.' : `Android release ${tag}.`,
     '',
     `Commit: [${context.sha.slice(0, 7)}](https://github.com/${repo.owner}/${repo.repo}/commit/${context.sha})`,
     `Build: [${build}](https://github.com/${repo.owner}/${repo.repo}/actions/runs/${context.runId})`,
@@ -37,12 +47,12 @@ module.exports = async function publish({ github, context, core, readFile = fs.r
     if (!release) {
       release = (await github.rest.repos.createRelease({
         ...repo, tag_name: tag, target_commitish: context.sha,
-        name: 'iDroidLoader Nightly', body, prerelease: true, draft: true, make_latest: 'false',
+        name, body, prerelease: nightly, draft: true, make_latest: 'false',
       })).data;
     }
   }
 
-  // Upload both replacements before removing either currently downloadable asset.
+  // Upload all replacements before removing any currently downloadable asset.
   const uploaded = [];
   try {
     for (const name of files) {
@@ -68,22 +78,24 @@ module.exports = async function publish({ github, context, core, readFile = fs.r
     await github.rest.repos.updateReleaseAsset({ ...repo, asset_id: asset.id, name: asset.name });
   }
 
-  // Move only our rolling tag; the branch and other releases are never rewritten.
-  let tagExists = true;
-  try {
-    await github.rest.git.getRef({ ...repo, ref: `tags/${tag}` });
-  } catch (error) {
-    if (error.status !== 404) throw error;
-    tagExists = false;
-  }
-  if (tagExists) {
-    await github.rest.git.updateRef({ ...repo, ref: `tags/${tag}`, sha: context.sha, force: true });
-  } else {
-    await github.rest.git.createRef({ ...repo, ref: `refs/tags/${tag}`, sha: context.sha });
+  // Move only our rolling tag; stable tags are never rewritten.
+  if (nightly) {
+    let tagExists = true;
+    try {
+      await github.rest.git.getRef({ ...repo, ref: `tags/${tag}` });
+    } catch (error) {
+      if (error.status !== 404) throw error;
+      tagExists = false;
+    }
+    if (tagExists) {
+      await github.rest.git.updateRef({ ...repo, ref: `tags/${tag}`, sha: context.sha, force: true });
+    } else {
+      await github.rest.git.createRef({ ...repo, ref: `refs/tags/${tag}`, sha: context.sha });
+    }
   }
   await github.rest.repos.updateRelease({
-    ...repo, release_id: release.id, name: 'iDroidLoader Nightly', body,
-    prerelease: true, draft: false, make_latest: 'false',
+    ...repo, release_id: release.id, name, body,
+    prerelease: nightly, draft: false, make_latest: nightly ? 'false' : 'legacy',
   });
   core.notice(`Updated https://github.com/${repo.owner}/${repo.repo}/releases/tag/${tag}`);
 };

@@ -5,8 +5,10 @@ import { mockIPC, mockWindows } from '/node_modules/@tauri-apps/api/mocks.js';
 window.testCalls = [];
 const credentialsTest = new URLSearchParams(location.search).has('credentials');
 const wirelessTest = new URLSearchParams(location.search).has('wireless');
-if (credentialsTest || wirelessTest) localStorage.setItem('i18nextLng', 'en');
-const values = credentialsTest ? JSON.parse(localStorage.getItem('fixture-settings') || '{}') : {};
+const updaterTest = new URLSearchParams(location.search).has('updater');
+if (credentialsTest || wirelessTest || updaterTest) localStorage.setItem('i18nextLng', 'en');
+const values = credentialsTest || updaterTest ? JSON.parse(localStorage.getItem('fixture-settings') || '{}') : {};
+window.updateFixture = { release: { status: 'unavailable' }, nightly: { status: 'up_to_date' }, install: 'installer_opened', error: null, installError: null };
 let loggedIn = null;
 let wirelessRequest = null;
 window.wirelessStatus = message => wirelessRequest?.channel.onmessage(message);
@@ -15,9 +17,19 @@ window.failWireless = () => wirelessRequest?.reject({ type: 'remote_pairing', me
 mockIPC((command, args) => {
   window.testCalls.push({ command, args });
   if (command === 'plugin:store|load') return 1;
-  if (command === 'plugin:store|keys') return [];
+  if (command === 'plugin:store|keys') return Object.keys(values);
   if (command === 'plugin:store|get') return [values[args.key] ?? null, args.key in values];
   if (command === 'plugin:store|set') { values[args.key] = args.value; return null; }
+  if (command === 'plugin:store|save' && updaterTest) localStorage.setItem('fixture-settings', JSON.stringify(values));
+  if (command === 'android_update_info') return { version: '2.3.4-nightly.1', versionCode: 100000001, channel: new URLSearchParams(location.search).get('buildChannel') || 'release' };
+  if (command === 'check_android_update') {
+    if (window.updateFixture.error) throw window.updateFixture.error;
+    return window.updateFixture[args.channel];
+  }
+  if (command === 'install_android_update') {
+    if (window.updateFixture.installError) throw window.updateFixture.installError;
+    return { status: window.updateFixture.install };
+  }
   if (command === 'plugin:app|version') return '2.3.4';
   if (command === 'keyring_available') return credentialsTest;
   if (command === 'logged_in_as') return loggedIn;

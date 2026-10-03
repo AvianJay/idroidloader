@@ -63,14 +63,16 @@ function App() {
 
   useEffect(() => {
     const fetchVersion = async () => {
-      const version = await getVersion();
+      const version = platform === "android"
+        ? (await invoke<{ version: string }>("android_update_info")).version
+        : await getVersion();
       setVersion(version);
     };
-    fetchVersion();
-  }, []);
+    fetchVersion().catch(() => {});
+  }, [platform]);
 
   useEffect(() => {
-    checkForUpdates();
+    checkForUpdates().catch(() => {});
   }, []);
 
   const shortcutLabel = useCallback(
