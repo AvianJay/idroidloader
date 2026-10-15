@@ -10,6 +10,9 @@ pub mod dev;
 pub mod sideload;
 pub mod util;
 
+#[cfg(test)]
+mod test_support;
+
 #[derive(Debug, thiserror::Error)]
 pub enum SideloadError {
     #[error("Auth error {0}: {1}")]

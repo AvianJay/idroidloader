@@ -44,7 +44,7 @@ pub extern "system" fn Java_app_idroidloader_mobile_TlsSmokeTest_probe(
                 1 => {
                     let client = reqwest::Client::builder().timeout(timeout).build().ok()?;
                     client
-                        .get("https://ani.sidestore.io/v3/client_info")
+                        .get("https://ani.jkcoxson.com/v3/client_info")
                         .send()
                         .await
                         .ok()
@@ -66,7 +66,7 @@ pub extern "system" fn Java_app_idroidloader_mobile_TlsSmokeTest_probe(
                 }
                 3 | 4 => {
                     let client = reqwest::Client::builder().timeout(timeout).build().ok()?;
-                    let host = if test == 3 { "ani.sidestore.app" } else { "ani.sidestore.io" };
+                    let host = if test == 3 { "ani.jkcoxson.com" } else { "ani2.stikstore.app" };
                     let response = client
                         .post(format!("https://{host}/v3/get_headers"))
                         // Public dummy data: exercise POST/TLS without account or provisioning secrets.
@@ -88,14 +88,14 @@ pub extern "system" fn Java_app_idroidloader_mobile_TlsSmokeTest_probe(
                 }
                 5 => {
                     use isideload::{
-                        anisette::{AnisetteProvider, remote_v3::RemoteV3AnisetteProvider},
+                        anisette::{AnisetteDataGenerator, AnisetteProvider, remote_v3::RemoteV3AnisetteProvider},
                         auth::grandslam::GrandSlam,
                         util::storage::InMemoryStorage,
                     };
                     // Provision a fresh device in memory. No Apple account is used,
                     // and neither ADI data nor resulting headers are printed or saved.
-                    let mut provider = RemoteV3AnisetteProvider::new(
-                        "https://ani.sidestore.app/",
+                    let provider = RemoteV3AnisetteProvider::new(
+                        "https://ani.jkcoxson.com/",
                         Box::new(InMemoryStorage::new()),
                         "0".into(),
                     ).ok()?;
@@ -104,11 +104,9 @@ pub extern "system" fn Java_app_idroidloader_mobile_TlsSmokeTest_probe(
                         Ok(gs) => std::sync::Arc::new(gs),
                         Err(error) => return provisioning_probe_failure("lookup", error),
                     };
+                    let mut generator = AnisetteDataGenerator::new(std::sync::Arc::new(tokio::sync::RwLock::new(provider)));
                     tokio::time::timeout(std::time::Duration::from_secs(90), async {
-                        if let Err(error) = provider.provision(gs).await {
-                            return provisioning_probe_failure("provisioning", error);
-                        }
-                        let data = match provider.get_anisette_data().await {
+                        let data = match generator.get_anisette_data(gs).await {
                             Ok(data) => data,
                             Err(error) => return provisioning_probe_failure("headers", error),
                         };

@@ -10,7 +10,7 @@ import "./ErrorContext.css";
 import { toast } from "sonner";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Trans, useTranslation } from "react-i18next";
-import { useStore } from "./StoreContext";
+import { useAnisetteServer } from "./anisette";
 import {
   AppError,
   ErrorVariant,
@@ -32,10 +32,7 @@ export const ErrorProvider: React.FC<{ children: React.ReactNode }> = ({
   const [simpleError, setSimpleError] = useState<string | null>(null);
   const [moreDetailsOpen, setMoreDetailsOpen] = useState<boolean>(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [anisetteServer] = useStore<string>(
-    "anisetteServer",
-    "ani.sidestore.io",
-  );
+  const [anisetteServer] = useAnisetteServer();
   const { platform } = usePlatform();
 
   const getSuggestions = useCallback(

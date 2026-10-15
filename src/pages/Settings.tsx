@@ -14,6 +14,7 @@ import i18n, { sortedLanguages } from "../i18next";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { DeviceInfo } from "../Device";
 import { AndroidUpdater } from "../components/AndroidUpdater";
+import { anisetteServers, useAnisetteServer } from "../anisette";
 
 type SettingsProps = {
   ensureSelectedDevice: () => boolean;
@@ -23,16 +24,6 @@ type SettingsProps = {
   checkKeyring: () => Promise<void>;
 };
 
-let anisetteServers = [
-  ["ani.sidestore.io", "SideStore (.io)"],
-  ["ani.stikstore.app", "StikStore"],
-  ["ani.sidestore.app", "SideStore (.app)"],
-  ["ani.sidestore.zip", "SideStore (.zip)"],
-  ["ani.846969.xyz", "SideStore (.xyz)"],
-  ["ani.neoarz.xyz", "neoarz"],
-  ["ani.xu30.top", "SteX"],
-  ["anisette.wedotstud.io", "WE. Studio"],
-];
 export const Settings = ({
   ensureSelectedDevice,
   setSelectedDevice,
@@ -41,10 +32,7 @@ export const Settings = ({
   checkKeyring,
 }: SettingsProps) => {
   const { t } = useTranslation();
-  const [anisetteServer, setAnisetteServer] = useStore<string>(
-    "anisetteServer",
-    "ani.sidestore.io",
-  );
+  const [anisetteServer, setAnisetteServer] = useAnisetteServer();
 
   const [overrideKeyring, setOverrideKeyring] = useStore<boolean>(
     "overrideKeyring",
@@ -115,12 +103,6 @@ export const Settings = ({
           options={anisetteOptions}
           value={anisetteServer}
           onChange={setAnisetteServer}
-          allowCustom
-          defaultCustomValue="ani.yourserver.com"
-          customPlaceholder={t("settings.custom_anisette_placeholder")}
-          customLabel={t("settings.custom_anisette")}
-          customToggleLabel={t("settings.use_custom_anisette")}
-          presetToggleLabel={t("settings.back_preset_servers")}
         />
         <div>
           <Dropdown

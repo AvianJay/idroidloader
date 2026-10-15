@@ -18,6 +18,8 @@ use crate::sideload::cert_identity::APPLE_ROOT;
 use crate::{SideloadError, anisette::AnisetteClientInfo, util::plist::PlistDataExtract};
 
 const URL_BAG: &str = "https://gsa.apple.com/grandslam/GsService2/lookup";
+const URL_BAG_CLIENT_INFO: &str =
+    "<Mac15,7> <macOS;27.0;26A5378j> <com.apple.AuthKit/1 (com.apple.akd/1.0)>";
 
 pub struct GrandSlam {
     pub client: reqwest_middleware::ClientWithMiddleware,
@@ -26,6 +28,18 @@ pub struct GrandSlam {
 }
 
 impl GrandSlam {
+    #[cfg(test)]
+    pub(crate) fn for_test(service_url: &str) -> Self {
+        Self {
+            client: Self::build_reqwest_client(false, None).unwrap(),
+            client_info: AnisetteClientInfo {
+                client_info: "fixture-client".into(),
+                user_agent: "fixture-agent".into(),
+            },
+            url_bag: plist_macro::plist!(dict { "gsService": service_url }),
+        }
+    }
+
     /// Create a new GrandSlam instance
     ///
     /// # Arguments
@@ -51,9 +65,22 @@ impl GrandSlam {
         client: &reqwest_middleware::ClientWithMiddleware,
         base_headers: HeaderMap,
     ) -> Result<Dictionary, Report> {
+        Self::fetch_url_bag_from(client, base_headers, URL_BAG).await
+    }
+
+    async fn fetch_url_bag_from(
+        client: &reqwest_middleware::ClientWithMiddleware,
+        mut base_headers: HeaderMap,
+        url: &str,
+    ) -> Result<Dictionary, Report> {
         debug!("Fetching URL bag from GrandSlam");
+        // Lookup needs the macOS identity even when login uses server-provided client info.
+        base_headers.insert(
+            "X-Mme-Client-Info",
+            HeaderValue::from_static(URL_BAG_CLIENT_INFO),
+        );
         let resp = client
-            .get(URL_BAG)
+            .get(url)
             .headers(base_headers)
             .send()
             .await
@@ -283,6 +310,37 @@ impl GrandSlam {
 
 pub trait GrandSlamErrorChecker {
     fn check_grandslam_error(self) -> Result<Dictionary, Report<SideloadError>>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lookup_uses_macos_identity_even_with_windows_anisette() {
+        let (url, server) = crate::test_support::serve(1, |_, request| {
+            assert_eq!(request.method, "GET");
+            assert!(request.headers.contains(URL_BAG_CLIENT_INFO));
+            assert!(!request.headers.contains("fixture-windows"));
+            plist_to_xml_string(&plist_macro::plist!(dict { "urls": { "gsService": "fixture" } }))
+        });
+        let headers = GrandSlam::base_headers(
+            &AnisetteClientInfo {
+                client_info: "fixture-windows".into(),
+                user_agent: "fixture-agent".into(),
+            },
+            false,
+        )
+        .unwrap();
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let client = GrandSlam::build_reqwest_client(false, None).unwrap();
+            let urls = GrandSlam::fetch_url_bag_from(&client, headers, &url)
+                .await
+                .unwrap();
+            assert_eq!(urls.get_str("gsService").unwrap(), "fixture");
+        });
+        server.join().unwrap();
+    }
 }
 
 impl GrandSlamErrorChecker for Dictionary {

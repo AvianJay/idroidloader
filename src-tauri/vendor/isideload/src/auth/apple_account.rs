@@ -116,6 +116,129 @@ struct SmsSecurityCode {
     security_code_cooldown: bool,
 }
 
+/// Extracts the resync SIM (base64 `X-Apple-I-MD-DATA`) from a GSA response that
+/// demands an anisette resync (`Status.hsc == 434`); `None` otherwise.
+fn resync_sim(resp: &plist::Dictionary) -> Option<String> {
+    use base64::prelude::*;
+    let status = resp.get("Status")?.as_dictionary()?;
+    if status.get("hsc").and_then(plist::Value::as_signed_integer) != Some(434) {
+        return None;
+    }
+    match status.get("X-Apple-I-MD-DATA")? {
+        plist::Value::Data(d) => Some(BASE64_STANDARD.encode(d)),
+        plist::Value::String(s) => Some(s.clone()),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod login_tests {
+    use super::*;
+    use crate::{anisette::remote_v3::RemoteV3AnisetteProvider, util::storage::InMemoryStorage};
+    use plist_macro::plist_to_xml_string;
+
+    #[test]
+    fn resync_challenge_requires_434_and_accepts_data_or_base64() {
+        let encoded = plist!(dict { "Status": { "hsc": 434, "X-Apple-I-MD-DATA": "AQID" } });
+        let binary =
+            plist!(dict { "Status": { "hsc": 434, "X-Apple-I-MD-DATA": vec![1u8, 2, 3] } });
+        let unrelated = plist!(dict { "Status": { "hsc": 200, "X-Apple-I-MD-DATA": "AQID" } });
+        assert_eq!(resync_sim(&encoded).as_deref(), Some("AQID"));
+        assert_eq!(resync_sim(&binary).as_deref(), Some("AQID"));
+        assert_eq!(resync_sim(&unrelated), None);
+        assert_eq!(resync_sim(&plist!(dict { "Status": { "hsc": 434 } })), None);
+    }
+
+    #[test]
+    fn resynced_init_and_password_proof_use_the_same_fresh_anisette() {
+        let (url, server) = crate::test_support::serve(7, |index, request| {
+            if index == 0 || index == 3 {
+                assert_eq!(request.method, "GET");
+                assert_eq!(request.path, "/v3/client_info");
+                return r#"{"client_info":"fixture-windows","user_agent":"fixture-agent"}"#.into();
+            }
+            if index == 1 || index == 4 {
+                assert_eq!(request.path, "/v3/get_headers");
+                let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+                if index == 4 {
+                    assert_eq!(body["sim"], "AQID");
+                    assert!(body["device_id"].is_string());
+                    assert!(body["md_lu"].is_string());
+                } else {
+                    assert!(body.get("sim").is_none());
+                }
+                let otp = if index == 1 { "old-otp" } else { "fresh-otp" };
+                return serde_json::json!({"result":"Headers", "X-Apple-I-MD-M":"fixture-mdm", "X-Apple-I-MD":otp, "X-Apple-I-MD-RINFO":"17106176"}).to_string();
+            }
+            assert_eq!(request.method, "POST");
+            assert_eq!(request.path, "/gs");
+            let body: Dictionary = plist::from_bytes(&request.body).unwrap();
+            let payload = body.get_dict("Request").unwrap();
+            let cpd = payload.get_dict("cpd").unwrap();
+            assert_eq!(
+                cpd.get_str("X-Apple-I-MD").unwrap(),
+                if index == 2 { "old-otp" } else { "fresh-otp" }
+            );
+            let response = match index {
+                2 => {
+                    assert_eq!(payload.get_str("o").unwrap(), "init");
+                    plist!(dict { "Response": { "Status": { "hsc": 434, "ec": -80045, "X-Apple-I-MD-DATA": "AQID" } } })
+                }
+                5 => {
+                    assert_eq!(payload.get_str("o").unwrap(), "init");
+                    plist!(dict { "Response": { "Status": { "ec": 0 }, "s": vec![1u8; 16], "B": vec![2u8; 256], "i": 1, "c": "fixture-challenge", "sp": "s2k" } })
+                }
+                6 => {
+                    assert_eq!(payload.get_str("o").unwrap(), "complete");
+                    // Stop after observing the proof; no real Apple authentication is performed.
+                    plist!(dict { "Response": { "Status": { "ec": -12345, "em": "fixture complete" } } })
+                }
+                _ => unreachable!(),
+            };
+            plist_to_xml_string(&response)
+        });
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let mut provider =
+                RemoteV3AnisetteProvider::new(&url, Box::new(InMemoryStorage::new()), "0".into())
+                    .unwrap();
+            let gs = Arc::new(GrandSlam::for_test(&format!("{url}/gs")));
+            // Load a public fixture as an existing provisioning identity.
+            provider.state = Some(
+                plist::from_bytes(
+                    plist_to_xml_string(&plist!(dict {
+                        "keychain_identifier": vec![0u8; 16], "adi_pb": Vec::<u8>::new()
+                    }))
+                    .as_bytes(),
+                )
+                .unwrap(),
+            );
+            let mut account = AppleAccount {
+                email: "fixture@example.invalid".into(),
+                spd: None,
+                anisette_generator: AnisetteDataGenerator::new(Arc::new(tokio::sync::RwLock::new(
+                    provider,
+                ))),
+                grandslam_client: gs,
+                trusted_phone_numbers: None,
+                login_state: LoginState::NeedsLogin,
+                debug: false,
+                last_error: None,
+                err_429_retries: None,
+            };
+            let error = account
+                .login_inner("public-password-fixture")
+                .await
+                .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("GrandSlam error during proof login request")
+            );
+        });
+        server.join().unwrap();
+    }
+}
+
 impl AppleAccount {
     /// Create a new AppleAccountBuilder with the given email
     ///
@@ -208,9 +331,7 @@ impl AppleAccount {
                     return Ok(());
                 }
                 LoginState::NeedsDevice2FA => {
-                    if self.trusted_phone_numbers.is_none() {
-                        self.trusted_phone_numbers = Some(self.get_trusted_numbers().await?);
-                    }
+                    self.update_trusted_numbers().await;
                     self.send_trusted_device_2fa()
                         .await
                         .context("Failed to complete trusted device 2FA")?;
@@ -246,9 +367,7 @@ impl AppleAccount {
                     }
                 }
                 LoginState::NeedsSMS2FA(id) => {
-                    if self.trusted_phone_numbers.is_none() {
-                        self.trusted_phone_numbers = Some(self.get_trusted_numbers().await?);
-                    }
+                    self.update_trusted_numbers().await;
                     info!("SMS 2FA required");
                     self.login_state = self
                         .send_sms_2fa(id)
@@ -645,6 +764,23 @@ impl AppleAccount {
         })
     }
 
+    async fn update_trusted_numbers(&mut self) {
+        if self.trusted_phone_numbers.is_some() {
+            return;
+        }
+        match self.get_trusted_numbers().await {
+            Ok(numbers) => {
+                self.trusted_phone_numbers = Some(numbers);
+            }
+            Err(_) => {
+                // Doesn't need to be a fatal error for users who have trusted devices
+                warn!(
+                    "Failed to retrieve trusted phone numbers; continuing with trusted device 2FA"
+                );
+            }
+        };
+    }
+
     async fn get_trusted_numbers(&mut self) -> Result<Vec<TrustedNumber>, Report> {
         let anisette_data = self
             .anisette_generator
@@ -732,35 +868,30 @@ impl AppleAccount {
         let gs_service_url = self.grandslam_client.get_url("gsService")?;
         debug!("GrandSlam service URL: {}", gs_service_url);
 
-        let cpd = anisette_data.get_client_provided_data();
+        let mut cpd = anisette_data.get_client_provided_data();
 
         let srp_client = srp::Client::<G2048, Sha256>::new_with_options(false);
         let a: Vec<u8> = (0..32).map(|_| rand::random::<u8>()).collect();
         let a_pub = srp_client.compute_public_ephemeral(&a);
 
-        let req1 = plist!(dict {
-            "Header": {
-                "Version": "1.0.1"
-            },
-            "Request": {
-                "A2k": a_pub, // A2k = client public ephemeral
-                "cpd": cpd.clone(), // cpd = client provided data
-                "o": "init", // o = operation
-                "ps": [ // ps = protocols supported
-                    "s2k",
-                    "s2k_fo"
-                ],
-                "u": self.email.clone(), // u = username
-            }
-        });
+        let mut raw_response = self
+            .send_init_request(&gs_service_url, &cpd, &a_pub)
+            .await?;
 
-        debug!("Sending initial login request");
-
-        let response = self
-            .grandslam_client
-            .plist_request(&gs_service_url, &req1, None, self.err_429_retries)
-            .await
-            .context("Failed to send initial login request")?
+        if let Some(sim) = resync_sim(&raw_response) {
+            debug!("Anisette resync required (hsc 434); syncing then retrying init");
+            let fresh_anisette = self
+                .anisette_generator
+                .resync(&sim)
+                .await
+                .context("Anisette resync failed")?;
+            cpd = fresh_anisette.get_client_provided_data();
+            raw_response = self
+                .send_init_request(&gs_service_url, &cpd, &a_pub)
+                .await
+                .context("Failed to send resynced init request")?;
+        }
+        let response = raw_response
             .check_grandslam_error()
             .context("GrandSlam error during initial login request")?;
 
@@ -877,6 +1008,23 @@ impl AppleAccount {
             });
         }
 
+        if let Some(plist::Value::Integer(hsc)) = status.get("hsc") {
+            match hsc.as_signed() {
+                Some(200) => {}
+                Some(409) => {
+                    info!("2FA code already sent");
+                    self.update_trusted_numbers().await;
+                    return Ok(LoginState::NeedsDevice2FAVerification);
+                }
+                Some(code) => {
+                    warn!("Unknown GrandSlam status code {}", code);
+                }
+                None => {
+                    warn!("Unknown GrandSlam status code (invalid integer)");
+                }
+            }
+        }
+
         Ok(LoginState::LoggedIn)
     }
 
@@ -982,6 +1130,36 @@ impl AppleAccount {
         info!("Successfully retrieved app token for {}", app);
 
         Ok(app_token)
+    }
+
+    async fn send_init_request(
+        &mut self,
+        gs_service_url: &str,
+        cpd: &Dictionary,
+        a_pub: &Vec<u8>,
+    ) -> Result<Dictionary, Report> {
+        debug!("Sending initial login request");
+        let req1 = plist!(dict {
+            "Header": {
+                "Version": "1.0.1"
+            },
+            "Request": {
+                "A2k": a_pub.clone(), // A2k = client public ephemeral
+                "cpd": cpd.clone(), // cpd = client provided data
+                "o": "init", // o = operation
+                "ps": [ // ps = protocols supported
+                    "s2k", // password sent as sha256
+                    "s2k_fo" // password sent as utf8 hex string of sha256
+                ],
+                "u": self.email.clone(), // u = username
+            }
+        });
+
+        Ok(self
+            .grandslam_client
+            .plist_request(gs_service_url, &req1, None, self.err_429_retries)
+            .await
+            .context("Failed to send initial login request")?)
     }
 
     fn create_session_key(usr: &ClientVerifier<Sha256>, name: &str) -> Result<Vec<u8>, Report> {

@@ -5,7 +5,7 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { load } from "@tauri-apps/plugin-store";
 import { Modal } from "./components/Modal";
 import { toast } from "sonner";
-import { useStore } from "./StoreContext";
+import { useAnisetteServer } from "./anisette";
 import { useError } from "./ErrorContext";
 import { Certificate } from "./pages/Certificates";
 import { useTranslation } from "react-i18next";
@@ -30,10 +30,7 @@ export const AppleID = ({
   const [tfaOpen, setTfaOpen] = useState<boolean>(false);
   const [tfaCode, setTfaCode] = useState<string>("");
   const [addAccountOpen, setAddAccountOpen] = useState<boolean>(false);
-  const [anisetteServer] = useStore<string>(
-    "anisetteServer",
-    "ani.sidestore.io",
-  );
+  const [anisetteServer] = useAnisetteServer();
   const [certs, setCerts] = useState<Certificate[] | null>(null);
   const [selectedSerials, setSelectedSerials] = useState<string[]>([]);
   const [chooseCertsOpen, setChooseCertsOpen] = useState<boolean>(false);
